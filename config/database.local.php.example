@@ -1,0 +1,11 @@
+<?php
+/**
+ * Copy this file to database.local.php and fill in your real Hostinger
+ * MySQL credentials. database.local.php should be added to .gitignore
+ * and never committed.
+ */
+
+define('DB_HOST', 'localhost'); // Hostinger MySQL host, from hPanel
+define('DB_NAME', 'u123456789_financialfacts');
+define('DB_USER', 'u123456789_ffuser');
+define('DB_PASS', 'your-real-password-here');

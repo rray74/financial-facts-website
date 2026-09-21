@@ -1,0 +1,14 @@
+# Prevent directory listing
+Options -Indexes
+
+# Block access to dotfiles (.env, .git, etc.) if any end up here
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Basic security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

@@ -1,0 +1,44 @@
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build CSS/JS
+        run: npm run build
+
+      - name: Deploy via rsync over SSH
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avzr --delete --exclude='.git*' --exclude='node_modules' --exclude='config/database.local.php'
+          path: ./
+          remote_path: ${{ secrets.HOSTINGER_PATH }}
+          remote_host: ${{ secrets.HOSTINGER_HOST }}
+          remote_port: ${{ secrets.HOSTINGER_PORT }}
+          remote_user: ${{ secrets.HOSTINGER_USER }}
+          remote_key: ${{ secrets.HOSTINGER_SSH_KEY }}
+
+# Notes:
+# - --delete removes files on the server that no longer exist in the repo.
+#   That's usually what you want, but be aware it applies to everything
+#   under remote_path except the excluded config file.
+# - config/database.local.php is excluded so the real DB password, which
+#   only ever exists on the server, is never touched by a deploy.
+# - Required repo secrets (Settings > Secrets and variables > Actions):
+#     HOSTINGER_HOST, HOSTINGER_PORT, HOSTINGER_USER,
+#     HOSTINGER_SSH_KEY (private key), HOSTINGER_PATH
