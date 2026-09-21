@@ -21,10 +21,7 @@ include __DIR__ . '/../includes/header.php';
 ?>
 
 <article>
-    <a href="/category.php?slug=<?= e($article['category_slug']) ?>"
-       class="font-mono text-xs uppercase tracking-wide text-secondary hover:text-accent">
-        <?= e($article['category_name']) ?>
-    </a>
+    <p class="font-mono text-xs uppercase tracking-wide text-secondary">Article (preview — not yet linked in navigation)</p>
 
     <h1 class="font-display text-4xl font-semibold mt-2 mb-6 leading-tight">
         <?= e($article['title']) ?>

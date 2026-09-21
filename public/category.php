@@ -14,7 +14,7 @@ if (!$category) {
 }
 
 $pageTitle = $category['name'];
-$articles = getPublishedArticles($category['id']);
+$subcategories = getSubcategoriesByCategoryId($category['id']);
 
 include __DIR__ . '/../includes/header.php';
 ?>
@@ -27,15 +27,16 @@ include __DIR__ . '/../includes/header.php';
     <?php endif; ?>
 </section>
 
-<?php if (empty($articles)): ?>
-    <p class="opacity-70">No articles in this category yet.</p>
+<?php if (empty($subcategories)): ?>
+    <p class="opacity-70">No subcategories here yet.</p>
 <?php else: ?>
     <div class="grid sm:grid-cols-2 gap-6">
-        <?php foreach ($articles as $article): ?>
-            <a href="/article.php?slug=<?= e($article['slug']) ?>" class="fact-card p-6 block">
-                <h3 class="font-display text-xl font-semibold mb-2"><?= e($article['title']) ?></h3>
-                <?php if ($article['summary']): ?>
-                    <p class="text-sm opacity-80"><?= e($article['summary']) ?></p>
+        <?php foreach ($subcategories as $subcategory): ?>
+            <a href="/subcategory.php?category=<?= e($category['slug']) ?>&slug=<?= e($subcategory['slug']) ?>"
+               class="fact-card p-6 block">
+                <h3 class="font-display text-xl font-semibold mb-2"><?= e($subcategory['name']) ?></h3>
+                <?php if ($subcategory['description']): ?>
+                    <p class="text-sm opacity-80"><?= e($subcategory['description']) ?></p>
                 <?php endif; ?>
             </a>
         <?php endforeach; ?>

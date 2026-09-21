@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../includes/functions.php';
 
 $pageTitle = 'Home';
-$articles = getPublishedArticles();
+$categories = getAllCategories();
 
 include __DIR__ . '/../includes/header.php';
 ?>
@@ -17,30 +17,43 @@ include __DIR__ . '/../includes/header.php';
     </p>
 </section>
 
-<section>
-    <h2 class="font-display text-xl font-semibold mb-6 border-b-2 border-primary pb-2">
-        Latest articles
-    </h2>
+<?php foreach ($categories as $category): ?>
+    <?php $subcategories = getSubcategoriesByCategoryId($category['id']); ?>
+    <?php if (empty($subcategories)) continue; ?>
 
-    <?php if (empty($articles)): ?>
-        <p class="opacity-70">No articles published yet.</p>
-    <?php else: ?>
-        <div class="grid sm:grid-cols-2 gap-6">
-            <?php foreach ($articles as $article): ?>
-                <a href="/article.php?slug=<?= e($article['slug']) ?>" class="fact-card p-6 block">
-                    <span class="font-mono text-xs uppercase tracking-wide text-secondary">
-                        <?= e($article['category_name']) ?>
-                    </span>
-                    <h3 class="font-display text-xl font-semibold mt-2 mb-2">
-                        <?= e($article['title']) ?>
-                    </h3>
-                    <?php if ($article['summary']): ?>
-                        <p class="text-sm opacity-80"><?= e($article['summary']) ?></p>
-                    <?php endif; ?>
+    <section class="mb-14">
+        <div class="flex items-baseline justify-between border-b-2 border-primary pb-2 mb-6">
+            <h2 class="font-display text-2xl font-semibold">
+                <a href="/category.php?slug=<?= e($category['slug']) ?>" class="hover:text-accent">
+                    <?= e($category['name']) ?>
                 </a>
+            </h2>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-8">
+            <?php foreach ($subcategories as $subcategory): ?>
+                <?php $subjects = getSubjectsBySubcategoryId($subcategory['id']); ?>
+                <div>
+                    <h3 class="font-mono text-xs uppercase tracking-wide text-secondary mb-3">
+                        <?= e($subcategory['name']) ?>
+                    </h3>
+                    <ul class="space-y-2">
+                        <?php foreach ($subjects as $subject): ?>
+                            <li>
+                                <a href="/fact.php?slug=<?= e($subject['slug']) ?>"
+                                   class="hover:text-accent transition-colors">
+                                    <?= e($subject['name']) ?>
+                                </a>
+                            </li>
+                        <?php endforeach; ?>
+                        <?php if (empty($subjects)): ?>
+                            <li class="opacity-50 text-sm">Nothing here yet.</li>
+                        <?php endif; ?>
+                    </ul>
+                </div>
             <?php endforeach; ?>
         </div>
-    <?php endif; ?>
-</section>
+    </section>
+<?php endforeach; ?>
 
 <?php include __DIR__ . '/../includes/footer.php'; ?>

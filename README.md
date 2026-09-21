@@ -1,21 +1,89 @@
 # Financial Facts
 
-A PHP + MySQL site where articles are assembled at request time from
-individually-dated facts stored in the database, rather than written as
-static blog posts. Styled with Tailwind CSS + DaisyUI.
+A PHP + MySQL site structured as a browsable hierarchy of financial facts:
+**Category → Subcategory → Subject → Facts**. Each Subject is a single
+keyword/search-phrase page (e.g. "2-Year Fixed Mortgage Rates") showing
+its full pool of facts. Styled with Tailwind CSS + DaisyUI. Articles/news
+are a deliberate later-stage addition — the groundwork exists but isn't
+linked from navigation yet.
 
 ## How content works
 
-- **`facts`** — atomic data points (a rate, an allowance, a threshold),
-  each with its own value, unit, source and last-updated date.
-- **`article_templates`** — article text containing placeholders like
-  `{{fact:uk_base_rate:value}}`. `includes/functions.php` resolves these
-  live against the `facts` table on every page load, so updating one row
-  in `facts` updates every article that references it, immediately.
+- **`categories`** — top-level sections (Mortgages, Savings, Tax…).
+- **`subcategories`** — groupings within a category (e.g. Mortgages →
+  Fixed Rate Mortgages, Variable Rate Mortgages).
+- **`subjects`** — a single keyword/search-phrase target, e.g.
+  "2-Year Fixed Mortgage Rates". Its slug is the fact page's URL
+  (`/fact.php?slug=2-year-fixed-mortgage-rates`).
+- **`facts`** — the pool of data points belonging to a subject (value,
+  unit, source, last-updated date, review cadence). A fact page shows
+  every fact in its subject's pool — nothing is hidden or rotated.
 
-Placeholder syntax: `{{fact:KEY}}` or `{{fact:KEY:FIELD}}` where FIELD is
-one of `value`, `unit`, `label`, `context`, `source`, `updated`. A bare
-`{{fact:KEY}}` renders as `label: value unit`.
+**Why no randomization**: an earlier version of this scaffold rotated a
+random subset of facts per day for "freshness." That's backwards —
+reshuffling which facts are visible doesn't add information, so it earns
+no SEO benefit, and it hides some facts from some crawls for no reason.
+What genuinely helps is explained below.
+
+**Articles** (`article_templates`, `article.php`, `renderArticleBody()`)
+still work — a body can contain `{{fact:key:value}}`-style placeholders
+resolved live — but nothing currently links to them. That's intentional;
+wire them in whenever you're ready to start the articles/news stage.
+
+## Fact update procedure
+
+This is the actual freshness mechanism: genuinely updating a fact's
+`value` and `last_updated` when the real-world figure changes is what
+search engines reward — not display tricks. The site supports this with
+a review cadence and a dashboard to act on it.
+
+**1. Every fact has its own `review_frequency_days`.** Different data
+types go stale at very different rates, so one blanket schedule doesn't
+fit:
+
+| Data type | Suggested cadence | Why |
+|---|---|---|
+| Mortgage/savings rates (best-buy, average) | 7 days | Move weekly in normal markets |
+| Bank of England base rate | 42 days | Set at MPC meetings (~every 6 weeks) |
+| Product fees, typical costs | 30 days | Change occasionally, worth a monthly glance |
+| Statutory allowances (ISA, personal allowance, thresholds) | 365 days | Fixed for the tax year, rarely mid-year changes |
+
+Set this per fact when you add it — it's a column on `facts`, not a
+global setting.
+
+**2. `/admin/review.php` lists everything currently overdue**, most
+overdue first, with a direct link to each fact's source to check against
+and to its live fact page. Nothing is auto-updated — you check the real
+figure and, in phpMyAdmin, update `value` (if it changed) and always
+`last_updated` (even if it didn't — that confirms it was checked and
+resets the countdown).
+
+**3. Protect that page before it goes anywhere near production** —
+it's currently open to anyone who finds the URL. `public/admin/.htaccess`
+is set up for HTTP Basic Auth but needs a `.htpasswd` file, which is
+deliberately not part of this scaffold (same treatment as DB
+credentials):
+
+```bash
+# Generate it once, locally or on the server:
+htpasswd -c .htpasswd yourusername
+# (MAMP PRO ships one too, at /Applications/MAMP/Library/bin/htpasswd)
+```
+
+Then:
+- **Locally**: drop the resulting `.htpasswd` into `public/admin/` and
+  edit `AuthUserFile` in `public/admin/.htaccess` to the real path on
+  your machine (MAMP PRO's document root, not this repo's path).
+- **On Hostinger**: upload `.htpasswd` into `public/admin/` on the server
+  and set `AuthUserFile` to the real server path (hPanel's File Manager
+  shows this, or check via SSH with `pwd`). It's gitignored and excluded
+  from the GitHub Actions rsync, so it's set once per environment and
+  survives every redeploy untouched.
+
+**4. Suggested cadence for actually doing the reviews**: check
+`/admin/review.php` weekly. Because cadences are staggered by data type,
+most weeks it'll be short — mainly rate-type facts — with the annual
+allowances only surfacing once a year around the tax-year change.
 
 ## Project structure
 
@@ -25,13 +93,18 @@ financial-facts/
 │   ├── database.php              # connection logic (PDO)
 │   └── database.local.php.example # copy to database.local.php with real creds
 ├── includes/
-│   ├── functions.php             # DB queries + placeholder rendering
+│   ├── functions.php             # DB queries, daily-seeded fact selection
 │   ├── header.php                # <head>, nav, links to compiled CSS/JS
 │   └── footer.php
 ├── public/                       # <-- point your Hostinger domain here
-│   ├── index.php
-│   ├── category.php
-│   ├── article.php
+│   ├── index.php                 # browse categories > subcategories > subjects
+│   ├── category.php              # subcategories within a category
+│   ├── subcategory.php           # subjects within a subcategory
+│   ├── fact.php                  # a subject's full fact pool
+│   ├── article.php               # dormant — not linked yet, see "How content works"
+│   ├── admin/
+│   │   ├── review.php            # facts overdue for review, see "Fact update procedure"
+│   │   └── .htaccess             # Basic Auth — needs a .htpasswd you generate yourself
 │   ├── .htaccess
 │   └── assets/css/tailwind.css   # compiled output — see "Node build tooling"
 │   └── assets/js/main.js         # compiled output
@@ -39,7 +112,7 @@ financial-facts/
 │   ├── input.css                 # Tailwind v4 + DaisyUI v5 source, theme tokens
 │   └── main.js                   # JS entry point for esbuild
 ├── sql/
-│   └── schema.sql                # tables + seed data
+│   └── schema.sql                # tables + seed data (categories>subcategories>subjects>facts)
 ├── package.json                  # build tooling only — not used at runtime
 └── README.md
 ```
@@ -117,11 +190,15 @@ is the important part regardless of which you pick.
 
 ## Adding content
 
-- New fact: insert a row into `facts` (via phpMyAdmin, or build a small
-  admin form later).
-- New article: insert a row into `article_templates`, writing HTML in
-  `body` and dropping in `{{fact:key:field}}` wherever a live figure
-  should appear. Set `status = 'published'` when ready.
+1. **New category/subcategory**: insert a row into `categories` or
+   `subcategories` (phpMyAdmin, or a future admin form).
+2. **New subject**: insert a row into `subjects` with a unique `slug` —
+   this becomes the fact page's URL and should target a specific search
+   phrase.
+3. **New facts**: insert rows into `facts` with that subject's `id`.
+   Aim for ~20 per subject so the daily rotation (10 shown at a time)
+   is meaningful — fewer than 10 just means the page always shows all
+   of them.
 
 ## Node build tooling
 

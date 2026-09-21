@@ -1,0 +1,15 @@
+# Password-protects everything in this folder. Without a real .htpasswd
+# file present alongside this .htaccess, this folder will 403 for
+# everyone (fails closed) rather than being silently open.
+#
+# Generate .htpasswd — from your terminal, NOT committed to git:
+#   htpasswd -c .htpasswd yourusername
+# (macOS/Linux ship htpasswd already; if the command isn't found, MAMP PRO
+# also has one at /Applications/MAMP/Library/bin/htpasswd)
+# Then upload the resulting .htpasswd file into this same admin/ folder
+# on the server (and, for local dev, into public/admin/ here too).
+
+AuthType Basic
+AuthName "Financial Facts — Admin"
+AuthUserFile /full/server/path/to/financial-facts/public/admin/.htpasswd
+Require valid-user
