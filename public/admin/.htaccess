@@ -11,5 +11,5 @@
 
 AuthType Basic
 AuthName "Financial Facts — Admin"
-AuthUserFile /full/server/path/to/financial-facts/public/admin/.htpasswd
+AuthUserFile "/Users/richardray/Dropbox/_Publishing/Financial Facts/_financial-facts-website/public/admin/.htpasswd"
 Require valid-user
