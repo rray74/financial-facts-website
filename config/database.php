@@ -23,7 +23,18 @@ function getDbConnection(): PDO
     static $pdo = null;
 
     if ($pdo === null) {
+        // DB_PORT and DB_SOCKET are optional — Hostinger's default socket
+        // connection needs neither, but local setups (MAMP PRO, Docker)
+        // often run MySQL on a non-default port or a socket file PHP's
+        // built-in default won't find. Define either in
+        // config/database.local.php only if you actually need it.
         $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4';
+        if (defined('DB_PORT') && DB_PORT) {
+            $dsn .= ';port=' . DB_PORT;
+        }
+        if (defined('DB_SOCKET') && DB_SOCKET) {
+            $dsn .= ';unix_socket=' . DB_SOCKET;
+        }
 
         try {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, [
