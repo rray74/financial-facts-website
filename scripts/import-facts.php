@@ -64,7 +64,7 @@ if ($firstBytes !== "\xEF\xBB\xBF") {
     rewind($handle);
 }
 
-$header = fgetcsv($handle);
+$header = fgetcsv($handle, 0, ',', '"', '\\');
 if ($header === false) {
     fwrite(STDERR, "CSV appears empty.\n");
     exit(1);
@@ -72,7 +72,7 @@ if ($header === false) {
 $header = array_map('trim', $header);
 
 $rowNum = 1;
-while (($row = fgetcsv($handle)) !== false) {
+while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
     $rowNum++;
 
     if (count(array_filter($row, fn($v) => trim((string) $v) !== '')) === 0) {
