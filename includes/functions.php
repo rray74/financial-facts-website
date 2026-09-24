@@ -207,3 +207,30 @@ function e(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
+
+// ============================================================
+// Clean URL helpers — every internal link should use these rather
+// than hand-building a ?slug=... path, so the URL format only ever
+// needs to change in one place. See public/.htaccess for the
+// rewrite rules that make these paths actually work.
+// ============================================================
+
+function categoryUrl(string $categorySlug): string
+{
+    return '/category/' . rawurlencode($categorySlug);
+}
+
+function subcategoryUrl(string $categorySlug, string $subcategorySlug): string
+{
+    return '/category/' . rawurlencode($categorySlug) . '/' . rawurlencode($subcategorySlug);
+}
+
+function factUrl(string $subjectSlug): string
+{
+    return '/fact/' . rawurlencode($subjectSlug);
+}
+
+function articleUrl(string $articleSlug): string
+{
+    return '/article/' . rawurlencode($articleSlug);
+}

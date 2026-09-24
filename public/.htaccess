@@ -12,3 +12,40 @@ Options -Indexes
     Header set X-Frame-Options "SAMEORIGIN"
     Header set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
+
+# ------------------------------------------------------------
+# Clean URLs
+#
+# Public-facing paths are e.g. /fact/2-year-fixed-mortgage-rates,
+# /category/mortgages, /category/mortgages/fixed-rate-mortgages,
+# /article/some-article. Internally these still run the same
+# fact.php / category.php / subcategory.php / article.php with the
+# same $_GET params as before — only the URL shape changes.
+#
+# The redirect block runs first so a direct hit on the old
+# ?slug=... form (a bookmark, an old link, a crawler that already
+# indexed one) gets a permanent redirect to the canonical clean URL,
+# rather than serving duplicate content at two addresses.
+# ------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # --- Redirects: old query-string URLs -> canonical clean URLs ---
+    RewriteCond %{THE_REQUEST} \s/+subcategory\.php\?category=([^&\s]+)&slug=([^&\s]+) [NC]
+    RewriteRule ^ /category/%1/%2? [R=301,L]
+
+    RewriteCond %{THE_REQUEST} \s/+category\.php\?slug=([^&\s]+) [NC]
+    RewriteRule ^ /category/%1? [R=301,L]
+
+    RewriteCond %{THE_REQUEST} \s/+fact\.php\?slug=([^&\s]+) [NC]
+    RewriteRule ^ /fact/%1? [R=301,L]
+
+    RewriteCond %{THE_REQUEST} \s/+article\.php\?slug=([^&\s]+) [NC]
+    RewriteRule ^ /article/%1? [R=301,L]
+
+    # --- Internal rewrites: clean URLs -> actual scripts ---
+    RewriteRule ^category/([^/]+)/([^/]+)/?$ subcategory.php?category=$1&slug=$2 [L,QSA]
+    RewriteRule ^category/([^/]+)/?$ category.php?slug=$1 [L,QSA]
+    RewriteRule ^fact/([^/]+)/?$ fact.php?slug=$1 [L,QSA]
+    RewriteRule ^article/([^/]+)/?$ article.php?slug=$1 [L,QSA]
+</IfModule>

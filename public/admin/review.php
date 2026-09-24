@@ -41,7 +41,7 @@ include __DIR__ . '/../../includes/header.php';
             <?php foreach ($dueFacts as $fact): ?>
             <tr class="border-b border-primary/20">
                 <td class="py-3 pr-4">
-                    <a href="/fact.php?slug=<?= e($fact['subject_slug']) ?>" class="hover:text-accent" target="_blank">
+                    <a href="<?= e(factUrl($fact['subject_slug'])) ?>" class="hover:text-accent" target="_blank">
                         <?= e($fact['subject_name']) ?>
                     </a>
                 </td>
