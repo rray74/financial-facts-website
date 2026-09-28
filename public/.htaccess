@@ -1,11 +1,3 @@
-# Prevent directory listing
-Options -Indexes
-
-# Block access to dotfiles (.env, .git, etc.) if any end up here
-<FilesMatch "^\.">
-    Require all denied
-</FilesMatch>
-
 # Basic security headers
 <IfModule mod_headers.c>
     Header set X-Content-Type-Options "nosniff"
@@ -16,36 +8,40 @@ Options -Indexes
 # ------------------------------------------------------------
 # Clean URLs
 #
-# Public-facing paths are e.g. /fact/2-year-fixed-mortgage-rates,
-# /category/mortgages, /category/mortgages/fixed-rate-mortgages,
-# /article/some-article. Internally these still run the same
-# fact.php / category.php / subcategory.php / article.php with the
-# same $_GET params as before — only the URL shape changes.
+# Public paths start with a two-letter country prefix:
+#   /uk/                                    index.php        (country home)
+#   /uk/mortgages/                          category.php
+#   /uk/mortgages/fixed-rate/               subcategory.php
+#   /uk/mortgages/fixed-rate/2-year-fixed/  fact.php
 #
-# The redirect block runs first so a direct hit on the old
-# ?slug=... form (a bookmark, an old link, a crawler that already
-# indexed one) gets a permanent redirect to the canonical clean URL,
-# rather than serving duplicate content at two addresses.
+# These rules only map a path to the right script. Each page then
+# checks it was reached at its canonical address and 301-redirects if
+# not (no trailing slash, an old URL, or a subject that has moved
+# subcategory). That logic lives in PHP, in redirectToCanonical(), so
+# there's only one place where URLs are decided.
 # ------------------------------------------------------------
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # --- Redirects: old query-string URLs -> canonical clean URLs ---
-    RewriteCond %{THE_REQUEST} \s/+subcategory\.php\?category=([^&\s]+)&slug=([^&\s]+) [NC]
-    RewriteRule ^ /category/%1/%2? [R=301,L]
+    # Real files and folders (assets/, admin/, and direct hits on the
+    # .php pages) are served as they are, never rewritten.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
 
-    RewriteCond %{THE_REQUEST} \s/+category\.php\?slug=([^&\s]+) [NC]
-    RewriteRule ^ /category/%1? [R=301,L]
+    # --- Country URLs ---
+    RewriteRule ^([a-z]{2})/?$ index.php?country=$1 [L,QSA]
+    RewriteRule ^([a-z]{2})/([^/]+)/?$ category.php?country=$1&slug=$2 [L,QSA]
+    RewriteRule ^([a-z]{2})/([^/]+)/([^/]+)/?$ subcategory.php?country=$1&category=$2&slug=$3 [L,QSA]
+    RewriteRule ^([a-z]{2})/([^/]+)/([^/]+)/([^/]+)/?$ fact.php?country=$1&category=$2&subcategory=$3&slug=$4 [L,QSA]
 
-    RewriteCond %{THE_REQUEST} \s/+fact\.php\?slug=([^&\s]+) [NC]
-    RewriteRule ^ /fact/%1? [R=301,L]
+    # --- Articles (dormant, not tied to a country yet) ---
+    RewriteRule ^article/([^/]+)/?$ article.php?slug=$1 [L,QSA]
 
-    RewriteCond %{THE_REQUEST} \s/+article\.php\?slug=([^&\s]+) [NC]
-    RewriteRule ^ /article/%1? [R=301,L]
-
-    # --- Internal rewrites: clean URLs -> actual scripts ---
+    # --- Old pre-country URLs ---
+    # Mapped to the same scripts without a country. The page falls back
+    # to the default country and 301-redirects to the new address.
     RewriteRule ^category/([^/]+)/([^/]+)/?$ subcategory.php?category=$1&slug=$2 [L,QSA]
     RewriteRule ^category/([^/]+)/?$ category.php?slug=$1 [L,QSA]
     RewriteRule ^fact/([^/]+)/?$ fact.php?slug=$1 [L,QSA]
-    RewriteRule ^article/([^/]+)/?$ article.php?slug=$1 [L,QSA]
 </IfModule>
