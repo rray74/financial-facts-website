@@ -1,18 +1,17 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 
+// Subject slugs are unique, so the slug alone identifies the page. The
+// country, category and subcategory in the URL are checked below by
+// redirecting to the subject's real address.
 $slug = $_GET['slug'] ?? '';
 $subject = $slug ? getSubjectBySlug($slug) : null;
 
 // Draft subjects don't exist as far as the public is concerned, so they
-// get the same 404 as a missing slug.
-if (!$subject || $subject['status'] === 'draft') {
-    http_response_code(404);
-    $pageTitle = 'Not found';
-    include __DIR__ . '/../includes/header.php';
-    echo '<p>Subject not found.</p>';
-    include __DIR__ . '/../includes/footer.php';
-    exit;
+// get the same 404 as a missing slug. So do subjects in a country that
+// isn't live yet.
+if (!$subject || $subject['status'] === 'draft' || !$subject['country_active'] || !$subject['country_prefix']) {
+    showErrorPage(404, 'Subject not found.');
 }
 
 // Retired subjects answer 410 Gone, which tells search engines the page
@@ -20,17 +19,20 @@ if (!$subject || $subject['status'] === 'draft') {
 // retired page has a natural replacement, a 301 redirect to it is
 // better. That can be added here once there's a column to store it.
 if ($subject['status'] === 'retired') {
-    http_response_code(410);
-    $pageTitle = 'No longer available';
-    include __DIR__ . '/../includes/header.php';
-    echo '<p>This page is no longer available.</p>';
-    include __DIR__ . '/../includes/footer.php';
-    exit;
+    showErrorPage(410, 'This page is no longer available.');
 }
 
-// meta_title / meta_description come from the subjects table when set.
-// $metaDescription is only output if includes/header.php prints it
-// (see the note that came with this file).
+// Sends old /fact/... URLs, missing trailing slashes, and links to a
+// subject's previous subcategory to its current address with a 301.
+$canonicalPath = subjectUrl(
+    $subject['country_prefix'], $subject['category_slug'], $subject['subcategory_slug'], $subject['slug']
+);
+redirectToCanonical($canonicalPath);
+
+$country = getCountryByPrefix($subject['country_prefix']);
+
+// meta_title / meta_description come from the subjects table when set,
+// falling back to the subject name and intro.
 $pageTitle = $subject['meta_title'] ?: $subject['name'];
 $metaDescription = $subject['meta_description'] ?: ($subject['intro'] ?? '');
 $facts = getFactsForSubject($subject['id']);
@@ -39,11 +41,11 @@ include __DIR__ . '/../includes/header.php';
 ?>
 
 <nav class="font-mono text-xs uppercase tracking-wide text-secondary mb-4">
-    <a href="<?= e(categoryUrl($subject['category_slug'])) ?>" class="hover:text-accent">
+    <a href="<?= e(categoryUrl($subject['country_prefix'], $subject['category_slug'])) ?>" class="hover:text-accent">
         <?= e($subject['category_name']) ?>
     </a>
     <span class="opacity-50">/</span>
-    <a href="<?= e(subcategoryUrl($subject['category_slug'], $subject['subcategory_slug'])) ?>"
+    <a href="<?= e(subcategoryUrl($subject['country_prefix'], $subject['category_slug'], $subject['subcategory_slug'])) ?>"
         class="hover:text-accent">
         <?= e($subject['subcategory_name']) ?>
     </a>
@@ -96,7 +98,7 @@ include __DIR__ . '/../includes/header.php';
         <?php if (!$fact['is_primary'] && $fact['owner_status'] === 'published'): ?>
         <?php // Shared fact: link to the page that owns it, for readers and for internal linking. ?>
         <p class="text-xs mt-2">
-            <a href="<?= e(factUrl($fact['owner_slug'])) ?>" class="text-secondary hover:text-accent">
+            <a href="<?= e(subjectUrlById((int) $fact['primary_subject_id'])) ?>" class="text-secondary hover:text-accent">
                 More on <?= e($fact['owner_name']) ?> &rarr;
             </a>
         </p>

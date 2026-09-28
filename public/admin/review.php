@@ -78,6 +78,7 @@ $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 
 $pageTitle = 'Facts Due for Review';
+$noindex = true; // admin page, keep it out of search results
 $dueFacts = getFactsDueForReview();
 $overlaps = getOverlappingSubjects(0.5);
 
@@ -123,7 +124,7 @@ include __DIR__ . '/../../includes/header.php';
             <?php foreach ($dueFacts as $fact): ?>
             <tr class="border-b border-primary/20 align-top">
                 <td class="py-3 pr-4">
-                    <a href="<?= e(factUrl($fact['subject_slug'])) ?>" class="hover:text-accent" target="_blank">
+                    <a href="<?= e(subjectUrlById((int) $fact['primary_subject_id'])) ?>" class="hover:text-accent" target="_blank">
                         <?= e($fact['subject_name']) ?>
                     </a>
                 </td>
@@ -212,12 +213,12 @@ include __DIR__ . '/../../includes/header.php';
                 <?php foreach ($overlaps as $pair): ?>
                 <tr class="border-b border-primary/20">
                     <td class="py-3 pr-4">
-                        <a href="<?= e(factUrl($pair['subject_a_slug'])) ?>" target="_blank" class="hover:text-accent">
+                        <a href="<?= e(subjectUrlById((int) $pair['subject_a_id'])) ?>" target="_blank" class="hover:text-accent">
                             <?= e($pair['subject_a_name']) ?>
                         </a>
                     </td>
                     <td class="py-3 pr-4">
-                        <a href="<?= e(factUrl($pair['subject_b_slug'])) ?>" target="_blank" class="hover:text-accent">
+                        <a href="<?= e(subjectUrlById((int) $pair['subject_b_id'])) ?>" target="_blank" class="hover:text-accent">
                             <?= e($pair['subject_b_name']) ?>
                         </a>
                     </td>

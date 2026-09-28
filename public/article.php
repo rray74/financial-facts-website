@@ -5,15 +5,14 @@ $slug = $_GET['slug'] ?? '';
 $article = $slug ? getArticleBySlug($slug) : null;
 
 if (!$article) {
-    http_response_code(404);
-    $pageTitle = 'Not found';
-    include __DIR__ . '/../includes/header.php';
-    echo '<p>Article not found.</p>';
-    include __DIR__ . '/../includes/footer.php';
-    exit;
+    showErrorPage(404, 'Article not found.');
 }
 
 $pageTitle = $article['title'];
+
+// Articles are a preview, not linked from navigation yet, so keep them
+// out of search results until that stage is built.
+$noindex = true;
 $renderedBody = renderArticleBody($article['body']);
 $sourceFacts = getFactsByKeys(extractFactKeysFromBody($article['body']));
 
@@ -40,13 +39,14 @@ include __DIR__ . '/../includes/header.php';
                 <?php foreach ($sourceFacts as $fact): ?>
                     <div class="fact-card p-4">
                         <p class="text-sm opacity-70"><?= e($fact['label']) ?></p>
+                        <?php // Same value formatting as the fact pages (e.g. £125,000, 4.25%). ?>
                         <p class="fact-value font-display text-2xl font-semibold text-primary">
-                            <?= e($fact['value']) ?><?= e($fact['unit'] ?? '') ?>
+                            <?= e(formatFactValue($fact)) ?>
                         </p>
                         <p class="text-xs opacity-60 mt-1">
                             <?= e($fact['source_name'] ?? '') ?>
                             &middot;
-                            updated <?= date('j M Y', strtotime($fact['last_updated'])) ?>
+                            checked <?= date('j M Y', strtotime($fact['last_verified_at'] ?? $fact['last_updated'])) ?>
                         </p>
                     </div>
                 <?php endforeach; ?>

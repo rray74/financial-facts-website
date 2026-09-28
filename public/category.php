@@ -1,19 +1,20 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 
+$country = resolveCountryFromRequest();
 $slug = $_GET['slug'] ?? '';
-$category = $slug ? getCategoryBySlug($slug) : null;
+$category = ($country && $slug) ? getCategoryBySlug((int) $country['id'], $slug) : null;
 
 if (!$category) {
-    http_response_code(404);
-    $pageTitle = 'Not found';
-    include __DIR__ . '/../includes/header.php';
-    echo '<p>Category not found.</p>';
-    include __DIR__ . '/../includes/footer.php';
-    exit;
+    showErrorPage(404, 'Category not found.');
 }
 
+// Old /category/... URLs and missing trailing slashes are sent to /uk/.../
+$canonicalPath = categoryUrl($country['url_prefix'], $category['slug']);
+redirectToCanonical($canonicalPath);
+
 $pageTitle = $category['name'];
+$metaDescription = $category['description'] ?? '';
 $subcategories = getSubcategoriesByCategoryId($category['id']);
 
 include __DIR__ . '/../includes/header.php';
@@ -32,7 +33,8 @@ include __DIR__ . '/../includes/header.php';
 <?php else: ?>
 <div class="grid sm:grid-cols-2 gap-6">
     <?php foreach ($subcategories as $subcategory): ?>
-    <a href="<?= e(subcategoryUrl($category['slug'], $subcategory['slug'])) ?>" class="fact-card p-6 block">
+    <a href="<?= e(subcategoryUrl($country['url_prefix'], $category['slug'], $subcategory['slug'])) ?>"
+        class="fact-card p-6 block">
         <h3 class="font-display text-xl font-semibold mb-2"><?= e($subcategory['name']) ?></h3>
         <?php if ($subcategory['description']): ?>
         <p class="text-sm opacity-80"><?= e($subcategory['description']) ?></p>

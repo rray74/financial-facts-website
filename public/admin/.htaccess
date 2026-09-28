@@ -1,15 +1,47 @@
-# Password-protects everything in this folder. Without a real .htpasswd
-# file present alongside this .htaccess, this folder will 403 for
-# everyone (fails closed) rather than being silently open.
-#
-# Generate .htpasswd — from your terminal, NOT committed to git:
-#   htpasswd -c .htpasswd yourusername
-# (macOS/Linux ship htpasswd already; if the command isn't found, MAMP PRO
-# also has one at /Applications/MAMP/Library/bin/htpasswd)
-# Then upload the resulting .htpasswd file into this same admin/ folder
-# on the server (and, for local dev, into public/admin/ here too).
+# Basic security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
 
-AuthType Basic
-AuthName "Financial Facts — Admin"
-AuthUserFile "/Users/richardray/Dropbox/_Publishing/Financial Facts/_financial-facts-website/public/admin/.htpasswd"
-Require valid-user
+# ------------------------------------------------------------
+# Clean URLs
+#
+# Public paths start with a two-letter country prefix:
+#   /uk/                                    index.php        (country home)
+#   /uk/mortgages/                          category.php
+#   /uk/mortgages/fixed-rate/               subcategory.php
+#   /uk/mortgages/fixed-rate/2-year-fixed/  fact.php
+#
+# These rules only map a path to the right script. Each page then
+# checks it was reached at its canonical address and 301-redirects if
+# not (no trailing slash, an old URL, or a subject that has moved
+# subcategory). That logic lives in PHP, in redirectToCanonical(), so
+# there's only one place where URLs are decided.
+# ------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Real files and folders (assets/, admin/, and direct hits on the
+    # .php pages) are served as they are, never rewritten.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # --- Country URLs ---
+    RewriteRule ^([a-z]{2})/?$ index.php?country=$1 [L,QSA]
+    RewriteRule ^([a-z]{2})/([^/]+)/?$ category.php?country=$1&slug=$2 [L,QSA]
+    RewriteRule ^([a-z]{2})/([^/]+)/([^/]+)/?$ subcategory.php?country=$1&category=$2&slug=$3 [L,QSA]
+    RewriteRule ^([a-z]{2})/([^/]+)/([^/]+)/([^/]+)/?$ fact.php?country=$1&category=$2&subcategory=$3&slug=$4 [L,QSA]
+
+    # --- Articles (dormant, not tied to a country yet) ---
+    RewriteRule ^article/([^/]+)/?$ article.php?slug=$1 [L,QSA]
+
+    # --- Old pre-country URLs ---
+    # Mapped to the same scripts without a country. The page falls back
+    # to the default country and 301-redirects to the new address.
+    RewriteRule ^category/([^/]+)/([^/]+)/?$ subcategory.php?category=$1&slug=$2 [L,QSA]
+    RewriteRule ^category/([^/]+)/?$ category.php?slug=$1 [L,QSA]
+    RewriteRule ^fact/([^/]+)/?$ fact.php?slug=$1 [L,QSA]
+</IfModule>

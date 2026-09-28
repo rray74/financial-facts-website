@@ -185,42 +185,78 @@ function getFactsByKeys(array $keys): array
     return $stmt->fetchAll();
 }
 
-// ============================================================
-// Category > Subcategory > Subject > Facts hierarchy
-// ============================================================
+// ------------------------------------------------------------
+// Countries
+//
+// Every public URL starts with a country prefix (/uk/...), taken from
+// jurisdictions.url_prefix. Only countries marked is_active are live.
+// ------------------------------------------------------------
 
 /**
- * Categories in countries that are live on the site. Categories in a
- * country still being built (jurisdictions.is_active = 0) stay hidden.
+ * Live countries, i.e. top-level jurisdictions with a URL prefix.
  */
-function getAllCategories(): array
+function getActiveCountries(): array
 {
-    $pdo = getDbConnection();
-    return $pdo->query(
-        'SELECT c.*
-         FROM categories c
-         JOIN jurisdictions j ON j.id = c.jurisdiction_id
-         WHERE j.is_active = 1
-         ORDER BY c.name ASC'
-    )->fetchAll();
+    static $countries = null;
+
+    if ($countries === null) {
+        $pdo = getDbConnection();
+        $countries = $pdo->query(
+            'SELECT * FROM jurisdictions
+             WHERE parent_id IS NULL AND url_prefix IS NOT NULL AND is_active = 1
+             ORDER BY id ASC'
+        )->fetchAll();
+    }
+
+    return $countries;
+}
+
+function getCountryByPrefix(string $prefix): ?array
+{
+    foreach (getActiveCountries() as $country) {
+        if ($country['url_prefix'] === $prefix) {
+            return $country;
+        }
+    }
+    return null;
 }
 
 /**
- * Category slugs are unique per country since migration 001. With only
- * the UK live, a slug alone is enough. When /uk/ style URLs are added,
- * this will take the country too.
+ * The country used when a URL doesn't say which one: the home page
+ * redirect, the old pre-country URLs, and admin pages. It's the first
+ * live country, which is the UK.
  */
-function getCategoryBySlug(string $slug): ?array
+function getDefaultCountry(): ?array
+{
+    return getActiveCountries()[0] ?? null;
+}
+
+// ------------------------------------------------------------
+// Category > Subcategory > Subject hierarchy
+// ------------------------------------------------------------
+
+/**
+ * A country's categories, for the navigation and its home page.
+ */
+function getCategoriesForCountry(int $countryId): array
+{
+    $pdo = getDbConnection();
+    $stmt = $pdo->prepare('SELECT * FROM categories WHERE jurisdiction_id = :jid ORDER BY name ASC');
+    $stmt->execute(['jid' => $countryId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Category slugs are unique per country (migration 001), so the lookup
+ * needs the country as well as the slug.
+ */
+function getCategoryBySlug(int $countryId, string $slug): ?array
 {
     $pdo = getDbConnection();
     $stmt = $pdo->prepare(
-        'SELECT c.*
-         FROM categories c
-         JOIN jurisdictions j ON j.id = c.jurisdiction_id
-         WHERE c.slug = :slug AND j.is_active = 1
-         LIMIT 1'
+        'SELECT * FROM categories WHERE jurisdiction_id = :jid AND slug = :slug LIMIT 1'
     );
-    $stmt->execute(['slug' => $slug]);
+    $stmt->execute(['jid' => $countryId, 'slug' => $slug]);
     return $stmt->fetch() ?: null;
 }
 
@@ -233,20 +269,20 @@ function getSubcategoriesByCategoryId(int $categoryId): array
 }
 
 /**
- * A subcategory slug is only unique per-category (see schema's
- * uniq_category_slug), so this needs the parent category's slug too.
+ * A subcategory slug is only unique within its category, and a category
+ * slug only within its country, so all three are needed.
  */
-function getSubcategoryBySlug(string $categorySlug, string $subcategorySlug): ?array
+function getSubcategoryBySlug(int $countryId, string $categorySlug, string $subcategorySlug): ?array
 {
     $pdo = getDbConnection();
     $stmt = $pdo->prepare(
         'SELECT sc.*, c.name AS category_name, c.slug AS category_slug
          FROM subcategories sc
          JOIN categories c ON c.id = sc.category_id
-         WHERE c.slug = :cslug AND sc.slug = :scslug
+         WHERE c.jurisdiction_id = :jid AND c.slug = :cslug AND sc.slug = :scslug
          LIMIT 1'
     );
-    $stmt->execute(['cslug' => $categorySlug, 'scslug' => $subcategorySlug]);
+    $stmt->execute(['jid' => $countryId, 'cslug' => $categorySlug, 'scslug' => $subcategorySlug]);
     return $stmt->fetch() ?: null;
 }
 
@@ -267,22 +303,27 @@ function getSubjectsBySubcategoryId(int $subcategoryId): array
 }
 
 /**
- * Subject slugs are globally unique (see schema), so this is a direct
- * lookup — but we still join up through subcategory/category for
- * breadcrumbs on the fact page.
+ * Subject slugs are globally unique (see schema), so the slug alone
+ * finds the subject, whatever category and subcategory the URL named.
+ * The fact page then redirects to the subject's real address, which is
+ * how a subject that moves subcategory keeps its old links working.
  *
- * Returns the subject whatever its status. The fact page decides what
- * to do with draft (404) and retired (410) subjects.
+ * Joins up through subcategory, category and country for breadcrumbs
+ * and for building that address. Returns the subject whatever its
+ * status. The fact page decides what to do with draft (404) and
+ * retired (410) subjects.
  */
 function getSubjectBySlug(string $slug): ?array
 {
     $pdo = getDbConnection();
     $stmt = $pdo->prepare(
         'SELECT s.*, sc.name AS subcategory_name, sc.slug AS subcategory_slug,
-                c.name AS category_name, c.slug AS category_slug
+                c.name AS category_name, c.slug AS category_slug,
+                j.url_prefix AS country_prefix, j.is_active AS country_active
          FROM subjects s
          JOIN subcategories sc ON sc.id = s.subcategory_id
          JOIN categories c ON c.id = sc.category_id
+         JOIN jurisdictions j ON j.id = c.jurisdiction_id
          WHERE s.slug = :slug
          LIMIT 1'
     );
@@ -387,34 +428,146 @@ function getOverlappingSubjects(float $threshold = 0.5): array
     return $stmt->fetchAll();
 }
 
+/**
+ * The country for a listing page. The /uk/... URLs always say which
+ * country, but the old pre-country URLs (/category/...) and direct hits
+ * on category.php don't, so those fall back to the default country and
+ * are then redirected to the proper /uk/ address.
+ *
+ * Returns NULL for a country prefix that isn't live, which is a 404.
+ */
+function resolveCountryFromRequest(): ?array
+{
+    $prefix = $_GET['country'] ?? '';
+    return $prefix === '' ? getDefaultCountry() : getCountryByPrefix($prefix);
+}
+
+/**
+ * Render an error page (404 Not Found, 410 Gone) inside the normal site
+ * layout, then stop. Error pages are marked noindex.
+ */
+function showErrorPage(int $status, string $message): void
+{
+    http_response_code($status);
+    $pageTitle = $status === 410 ? 'No longer available' : 'Not found';
+    $noindex = true;
+    include __DIR__ . '/header.php';
+    echo '<p>' . e($message) . '</p>';
+    include __DIR__ . '/footer.php';
+    exit;
+}
+
 function e(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
 
 // ============================================================
-// Clean URL helpers — every internal link should use these rather
-// than hand-building a ?slug=... path, so the URL format only ever
-// needs to change in one place. See public/.htaccess for the
-// rewrite rules that make these paths actually work.
+// URL helpers. Every internal link should use these rather than
+// hand-building a path, so the URL format only ever needs to change in
+// one place. See public/.htaccess for the rewrite rules that map these
+// paths to the PHP pages.
+//
+//   /uk/                                  country home
+//   /uk/mortgages/                        category
+//   /uk/mortgages/fixed-rate/             subcategory
+//   /uk/mortgages/fixed-rate/2-year-fixed/  subject (fact page)
+//
+// All end in a slash. Pages redirect anything else (no slash, an old
+// /fact/... URL, a subject's previous subcategory) to these, so each
+// page has exactly one address.
 // ============================================================
 
-function categoryUrl(string $categorySlug): string
+function countryUrl(string $countryPrefix): string
 {
-    return '/category/' . rawurlencode($categorySlug);
+    return '/' . rawurlencode($countryPrefix) . '/';
 }
 
-function subcategoryUrl(string $categorySlug, string $subcategorySlug): string
+function categoryUrl(string $countryPrefix, string $categorySlug): string
 {
-    return '/category/' . rawurlencode($categorySlug) . '/' . rawurlencode($subcategorySlug);
+    return countryUrl($countryPrefix) . rawurlencode($categorySlug) . '/';
 }
 
-function factUrl(string $subjectSlug): string
+function subcategoryUrl(string $countryPrefix, string $categorySlug, string $subcategorySlug): string
 {
-    return '/fact/' . rawurlencode($subjectSlug);
+    return categoryUrl($countryPrefix, $categorySlug) . rawurlencode($subcategorySlug) . '/';
 }
 
+function subjectUrl(string $countryPrefix, string $categorySlug, string $subcategorySlug, string $subjectSlug): string
+{
+    return subcategoryUrl($countryPrefix, $categorySlug, $subcategorySlug) . rawurlencode($subjectSlug) . '/';
+}
+
+/**
+ * A subject's URL from just its id, for places that only have the id
+ * (shared-fact owner links, the admin review page). Loads every
+ * subject's path in one query the first time it's called, then answers
+ * from memory, rather than one query per link.
+ */
+function subjectUrlById(int $subjectId): string
+{
+    static $paths = null;
+
+    if ($paths === null) {
+        $pdo = getDbConnection();
+        $rows = $pdo->query(
+            'SELECT s.id, s.slug, sc.slug AS subcategory_slug, c.slug AS category_slug, j.url_prefix
+             FROM subjects s
+             JOIN subcategories sc ON sc.id = s.subcategory_id
+             JOIN categories c ON c.id = sc.category_id
+             JOIN jurisdictions j ON j.id = c.jurisdiction_id'
+        )->fetchAll();
+
+        $paths = [];
+        foreach ($rows as $row) {
+            $paths[(int) $row['id']] = subjectUrl(
+                (string) $row['url_prefix'], $row['category_slug'], $row['subcategory_slug'], $row['slug']
+            );
+        }
+    }
+
+    return $paths[$subjectId] ?? '/';
+}
+
+/**
+ * Articles aren't tied to a country yet. They're dormant, and this can
+ * move under /uk/ when that stage starts.
+ */
 function articleUrl(string $articleSlug): string
 {
     return '/article/' . rawurlencode($articleSlug);
+}
+
+/**
+ * Full URL including scheme and domain, for the canonical tag. Uses
+ * SITE_URL if it's defined in the config (recommended on the live
+ * server, e.g. 'https://www.example.com'), otherwise works it out from
+ * the current request, which is fine for local development.
+ */
+function absoluteUrl(string $path): string
+{
+    if (defined('SITE_URL') && SITE_URL) {
+        return rtrim(SITE_URL, '/') . $path;
+    }
+
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+    return ($https ? 'https://' : 'http://') . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $path;
+}
+
+/**
+ * Send a permanent (301) redirect if the page was reached at anything
+ * other than its canonical path. This covers a missing trailing slash,
+ * the old /fact/... and /category/... URLs, direct hits on fact.php?slug=,
+ * and subjects that have moved subcategory.
+ */
+function redirectToCanonical(string $canonicalPath): void
+{
+    $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+
+    if ($requestPath !== $canonicalPath) {
+        header('Location: ' . $canonicalPath, true, 301);
+        exit;
+    }
 }
