@@ -414,3 +414,64 @@ function markFactVerified(PDO $pdo, int $factId): void
     );
     $stmt->execute(['id' => $factId]);
 }
+
+/**
+ * Record the value a fact had before its current one, e.g. the 2025/26
+ * rate when importing the 2026/27 rate for the first time. This gives
+ * the page's "What's changed" section real history from day one,
+ * instead of only from the first change the site itself sees.
+ *
+ * Writes one fact_history row: previous value -> current value, dated
+ * by $effectiveFrom (when the current value took effect). Safe to call
+ * on every import: if that exact change is already recorded (for
+ * example because updateFactValue() just wrote it), nothing is added.
+ *
+ * Returns true if a row was written.
+ */
+function recordPreviousValue(PDO $pdo, int $factId, string $previousValue, ?string $effectiveFrom): bool
+{
+    $stmt = $pdo->prepare('SELECT value, value_numeric, unit FROM facts WHERE id = :id');
+    $stmt->execute(['id' => $factId]);
+    $fact = $stmt->fetch();
+    if (!$fact) {
+        throw new RuntimeException("Fact $factId not found");
+    }
+
+    $previousValue = stripUnitFromValue($previousValue, $fact['unit']);
+    [, $previousNumeric] = parseFactValue($previousValue, $fact['unit']);
+
+    // Already recorded? Compare numerically where possible, so '10' and
+    // '10.00' count as the same value.
+    $stmt = $pdo->prepare(
+        'SELECT old_value, old_value_numeric FROM fact_history
+         WHERE fact_id = :fid AND old_value IS NOT NULL AND new_value = :new'
+    );
+    $stmt->execute(['fid' => $factId, 'new' => $fact['value']]);
+    foreach ($stmt->fetchAll() as $row) {
+        $sameNumber = $previousNumeric !== null && $row['old_value_numeric'] !== null
+            && (float) $previousNumeric === (float) $row['old_value_numeric'];
+        if ($sameNumber || $row['old_value'] === $previousValue) {
+            return false;
+        }
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO fact_history
+            (fact_id, old_value, old_value_numeric, new_value, new_value_numeric,
+             effective_from, change_source, note, changed_at)
+         VALUES (:fid, :old, :old_num, :new, :new_num, :effective_from, \'import\',
+                 \'Previous value recorded at import\', :changed_at)'
+    );
+    $stmt->execute([
+        'fid'            => $factId,
+        'old'            => $previousValue,
+        'old_num'        => $previousNumeric,
+        'new'            => $fact['value'],
+        'new_num'        => $fact['value_numeric'],
+        'effective_from' => $effectiveFrom,
+        // Date the row by when the change happened, not when it was imported.
+        'changed_at'     => ($effectiveFrom ?? date('Y-m-d')) . ' 00:00:00',
+    ]);
+
+    return true;
+}

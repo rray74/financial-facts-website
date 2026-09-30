@@ -90,8 +90,10 @@ function formatFactValue(array $fact): string
 
     if (in_array($unit, ['£', '$', '€'], true)) {
         // Money with pence always shows two decimal places, so £241.30
-        // doesn't display as £241.3. Whole amounts stay as £12,570.
-        if ($fraction !== '') {
+        // doesn't display as £241.3. Whole amounts stay as £12,570,
+        // unless the figure was entered with pence (e.g. '8.00' next to
+        // '7.55'), in which case the pence are kept.
+        if ($fraction !== '' || strpos((string) $fact['value'], '.') !== false) {
             $number = number_format((float) $numeric, 2);
         }
         return $unit . $number;
@@ -369,6 +371,70 @@ function getFactsForSubject(int $subjectId): array
     );
     $stmt->execute(['sid' => $subjectId]);
     return $stmt->fetchAll();
+}
+
+/**
+ * Recorded value changes for the facts on a subject page, newest first.
+ * Powers the page's "What's changed" section. Only real changes are
+ * included (rows with an old value), not the baseline rows written when
+ * a fact was first created.
+ */
+function getRecentChangesForSubject(int $subjectId, int $limit = 12): array
+{
+    $pdo = getDbConnection();
+    $stmt = $pdo->prepare(
+        "SELECT fh.old_value, fh.old_value_numeric, fh.new_value, fh.new_value_numeric,
+                COALESCE(fh.effective_from, DATE(fh.changed_at)) AS changed_on,
+                f.label, f.unit, f.value_type
+         FROM fact_history fh
+         JOIN facts f ON f.id = fh.fact_id AND f.status = 'published'
+         JOIN subject_facts sf ON sf.fact_id = f.id AND sf.subject_id = :sid
+         WHERE fh.old_value IS NOT NULL
+         ORDER BY changed_on DESC, fh.id DESC
+         LIMIT " . (int) $limit
+    );
+    $stmt->execute(['sid' => $subjectId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Format the old or new side of a history row the same way the fact
+ * itself is displayed (e.g. 8.75%, £187.18). $side is 'old' or 'new'.
+ */
+function formatHistoryValue(array $change, string $side): string
+{
+    return formatFactValue([
+        'value'         => $change[$side . '_value'],
+        'value_numeric' => $change[$side . '_value_numeric'],
+        'value_type'    => $change['value_type'],
+        'unit'          => $change['unit'],
+        'value_display' => null,
+    ]);
+}
+
+/**
+ * Every published numeric fact as fact_key => number, loaded once per
+ * request. Used by the worked examples, so their calculations always use
+ * the current figures.
+ */
+function getFactNumbers(): array
+{
+    static $numbers = null;
+
+    if ($numbers === null) {
+        $pdo = getDbConnection();
+        $rows = $pdo->query(
+            "SELECT fact_key, value_numeric FROM facts
+             WHERE status = 'published' AND value_numeric IS NOT NULL"
+        )->fetchAll();
+
+        $numbers = [];
+        foreach ($rows as $row) {
+            $numbers[$row['fact_key']] = (float) $row['value_numeric'];
+        }
+    }
+
+    return $numbers;
 }
 
 /**

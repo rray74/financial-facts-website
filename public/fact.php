@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
+require_once __DIR__ . '/../includes/worked-examples.php';
 
 // Subject slugs are unique, so the slug alone identifies the page. The
 // country, category and subcategory in the URL are checked below by
@@ -37,8 +38,30 @@ $pageTitle = $subject['meta_title'] ?: $subject['name'];
 $metaDescription = $subject['meta_description'] ?: ($subject['intro'] ?? '');
 $facts = getFactsForSubject($subject['id']);
 
+// Generated sections below the facts. Both come from the database, so
+// every page gains content that updates itself when the figures change.
+$workedExamples = getWorkedExamplesForSubject($subject['slug']);
+$changes = getRecentChangesForSubject((int) $subject['id']);
+
+// Breadcrumb structured data, so search results can show the
+// Category > Subcategory > Page trail instead of a bare URL.
+$breadcrumbJson = json_encode([
+    '@context'        => 'https://schema.org',
+    '@type'           => 'BreadcrumbList',
+    'itemListElement' => [
+        ['@type' => 'ListItem', 'position' => 1, 'name' => $subject['category_name'],
+         'item' => absoluteUrl(categoryUrl($subject['country_prefix'], $subject['category_slug']))],
+        ['@type' => 'ListItem', 'position' => 2, 'name' => $subject['subcategory_name'],
+         'item' => absoluteUrl(subcategoryUrl($subject['country_prefix'], $subject['category_slug'], $subject['subcategory_slug']))],
+        ['@type' => 'ListItem', 'position' => 3, 'name' => $subject['name'],
+         'item' => absoluteUrl($canonicalPath)],
+    ],
+], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG);
+
 include __DIR__ . '/../includes/header.php';
 ?>
+
+<script type="application/ld+json"><?= $breadcrumbJson ?></script>
 
 <nav class="font-mono text-xs uppercase tracking-wide text-secondary mb-4">
     <a href="<?= e(categoryUrl($subject['country_prefix'], $subject['category_slug'])) ?>" class="hover:text-accent">
@@ -106,6 +129,62 @@ include __DIR__ . '/../includes/header.php';
     </div>
     <?php endforeach; ?>
 </div>
+<?php endif; ?>
+
+<?php // Worked examples: calculated from the live figures above (see includes/worked-examples.php). ?>
+<?php foreach ($workedExamples as $example): ?>
+<section class="mt-14">
+    <h2 class="font-display text-2xl font-semibold mb-2"><?= e($example['title']) ?></h2>
+    <p class="opacity-80 max-w-xl mb-4"><?= e($example['intro']) ?></p>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="border-b-2 border-primary text-left font-mono text-xs uppercase tracking-wide">
+                    <?php foreach ($example['columns'] as $column): ?>
+                    <th class="py-2 pr-4"><?= e($column) ?></th>
+                    <?php endforeach; ?>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($example['rows'] as $row): ?>
+                <tr class="border-b border-primary/20">
+                    <?php foreach ($row as $i => $cell): ?>
+                    <td class="py-3 pr-4 <?= $i === 0 ? 'font-semibold' : 'fact-value' ?>"><?= e((string) $cell) ?></td>
+                    <?php endforeach; ?>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-xs opacity-60 mt-3"><?= e($example['note']) ?></p>
+</section>
+<?php endforeach; ?>
+
+<?php // What's changed: recorded value changes for this page's facts, newest first. ?>
+<?php if (!empty($changes)): ?>
+<section class="mt-14">
+    <h2 class="font-display text-2xl font-semibold mb-4">What's changed</h2>
+    <ul class="space-y-3 max-w-2xl">
+        <?php foreach ($changes as $change): ?>
+        <?php
+        // Describe the direction of numeric changes in words as well as figures.
+        $direction = 'changed';
+        if ($change['old_value_numeric'] !== null && $change['new_value_numeric'] !== null) {
+            $direction = (float) $change['new_value_numeric'] > (float) $change['old_value_numeric'] ? 'rose' : 'fell';
+        }
+        ?>
+        <li class="border-l-2 border-primary/30 pl-4">
+            <span class="font-mono text-xs uppercase tracking-wide text-secondary block">
+                <?= date('j F Y', strtotime($change['changed_on'])) ?>
+            </span>
+            <?= e($change['label']) ?> <?= $direction ?> from
+            <span class="fact-value font-semibold"><?= e(formatHistoryValue($change, 'old')) ?></span>
+            to
+            <span class="fact-value font-semibold"><?= e(formatHistoryValue($change, 'new')) ?></span>.
+        </li>
+        <?php endforeach; ?>
+    </ul>
+</section>
 <?php endif; ?>
 
 <?php include __DIR__ . '/../includes/footer.php'; ?>

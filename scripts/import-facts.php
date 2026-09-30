@@ -35,6 +35,9 @@
  *   subject_meta_description SEO description for the subject page
  *   subject_status           draft | published | retired, to publish, hide
  *                            or retire a subject page
+ *   previous_value           the value before the current one (e.g. last
+ *                            tax year's rate), recorded in the fact's
+ *                            history and dated by effective_from
  *
  * Editing existing pages without phpMyAdmin:
  *   Any filled-in name, description, intro, meta or subject_status cell is
@@ -246,7 +249,7 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             $factId = findFactIdByKey($pdo, $factKey);
 
             if (!$factId) {
-                createFact($pdo, [
+                $factId = createFact($pdo, [
                     'primary_subject_id'    => $subjectId,
                     'jurisdiction_id'       => (int) $jurisdiction['id'],
                     'fact_key'              => $factKey,
@@ -264,6 +267,9 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
                     'change_source'         => 'import',
                 ]);
                 $stats['created']++;
+                if ($get('previous_value') !== '') {
+                    recordPreviousValue($pdo, $factId, $get('previous_value'), $effectiveFrom);
+                }
                 return "created fact '$factKey'";
             }
 
@@ -303,6 +309,12 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
                 'tax_year'       => $get('tax_year') ?: null,
                 'note'           => 'CSV import',
             ]);
+
+            // Previous value from the spreadsheet (e.g. last year's rate).
+            // Skipped automatically if that change is already in history.
+            if ($get('previous_value') !== '') {
+                recordPreviousValue($pdo, $factId, $get('previous_value'), $effectiveFrom);
+            }
 
             $stats[$changed ? 'changed' : 'unchanged']++;
             return ($changed ? 'value changed for' : 'verified (unchanged)') . " fact '$factKey'";
