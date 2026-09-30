@@ -31,6 +31,9 @@ const FACT_SOURCE_ALLOWLIST = [
     'gov.scot'            => 'Open Government Licence v3.0',
     'revenue.scot'        => null,
     'gov.wales'           => 'Open Government Licence v3.0',
+    // National Savings and Investments, backed by HM Treasury, the
+    // official source for Premium Bonds rates and odds.
+    'nsandi.com'          => null,
 ];
 
 /**
