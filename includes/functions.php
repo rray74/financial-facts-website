@@ -413,6 +413,37 @@ function formatHistoryValue(array $change, string $side): string
 }
 
 /**
+ * Live figures for the "How we check our figures" page, so the claims
+ * it makes about sourcing are always true: how many facts are published,
+ * which publishers they come from, and when a figure was last checked.
+ */
+function getSourcingStats(): array
+{
+    $pdo = getDbConnection();
+
+    $totals = $pdo->query(
+        "SELECT COUNT(*) AS facts,
+                COUNT(DISTINCT f.source_id) AS sources,
+                SUM(src.is_allowlisted = 1) AS primary_facts,
+                MAX(f.last_verified_at) AS last_checked
+         FROM facts f
+         LEFT JOIN sources src ON src.id = f.source_id
+         WHERE f.status = 'published'"
+    )->fetch();
+
+    $publishers = $pdo->query(
+        "SELECT src.publisher, COUNT(*) AS facts
+         FROM facts f
+         JOIN sources src ON src.id = f.source_id
+         WHERE f.status = 'published'
+         GROUP BY src.publisher
+         ORDER BY facts DESC, src.publisher ASC"
+    )->fetchAll();
+
+    return ['totals' => $totals, 'publishers' => $publishers];
+}
+
+/**
  * Every published numeric fact as fact_key => number, loaded once per
  * request. Used by the worked examples, so their calculations always use
  * the current figures.
