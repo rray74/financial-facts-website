@@ -21,4 +21,4 @@ const SITE_OWNER_BIO = '';
 
 // Where readers can report an error or get in touch. Shown on the About,
 // sourcing and privacy pages. Leave blank to hide it.
-const SITE_CONTACT_EMAIL = 'info@financialfacts.com';
+const SITE_CONTACT_EMAIL = 'info@financial-facts.com';
