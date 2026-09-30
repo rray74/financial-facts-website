@@ -1,0 +1,23 @@
+# Password-protects everything in this folder.
+#
+# This file is an EXAMPLE. The real .htaccess and .htpasswd are
+# gitignored, because AuthUserFile must be the full path to .htpasswd
+# on each machine, and that path is different on your Mac and on
+# Hostinger. Create one per machine:
+#
+#   1. Copy this file to .htaccess in the same folder.
+#   2. Generate the password file in this folder:
+#        htpasswd -c .htpasswd yourusername
+#      (MAMP PRO also has htpasswd at /Applications/MAMP/Library/bin/htpasswd.
+#       If the server has no htpasswd command, generate the file on your
+#       Mac and upload it.)
+#   3. Set AuthUserFile below to the FULL path of that .htpasswd.
+#      On the server, run `pwd` in this folder over SSH to get it.
+#
+# If .htpasswd is missing or the path is wrong, the folder fails closed
+# (error, not open), so a mistake never exposes the admin pages.
+
+AuthType Basic
+AuthName "Financial Facts — Admin"
+AuthUserFile "/FULL/PATH/TO/public/admin/.htpasswd"
+Require valid-user
