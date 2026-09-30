@@ -89,6 +89,11 @@ function formatFactValue(array $fact): string
     $number = number_format((float) $numeric, strlen($fraction));
 
     if (in_array($unit, ['£', '$', '€'], true)) {
+        // Money with pence always shows two decimal places, so £241.30
+        // doesn't display as £241.3. Whole amounts stay as £12,570.
+        if ($fraction !== '') {
+            $number = number_format((float) $numeric, 2);
+        }
         return $unit . $number;
     }
     if ($unit === '%') {
