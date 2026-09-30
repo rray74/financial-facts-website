@@ -26,16 +26,29 @@
  *
  * Optional columns added with the new database structure:
  *   jurisdiction_code        e.g. GB (default), GB-SCT for a Scotland-only figure
- *   link_type                'primary' (default) or 'also' (see below)
+ *   link_type                'primary' (default), 'also' or 'unlink' (see below)
  *   value_display            display override, e.g. '£0 to £125,000'
  *   effective_from           YYYY-MM-DD the figure took effect (not in the future)
  *   tax_year                 e.g. 2026/27
  *   status                   draft | published (default published) | retired
  *   subject_meta_title       SEO title for the subject page
  *   subject_meta_description SEO description for the subject page
+ *   subject_status           draft | published | retired, to publish, hide
+ *                            or retire a subject page
+ *
+ * Editing existing pages without phpMyAdmin:
+ *   Any filled-in name, description, intro, meta or subject_status cell is
+ *   applied to the category, subcategory or subject on that row, whether
+ *   it's new or already exists. Blank cells never change anything, so a
+ *   one-row CSV can rename a subcategory or rewrite a subject's intro.
  *
  * link_type 'primary' (the default) creates or updates the fact, and
  * makes this row's subject the page that owns it.
+ *
+ * link_type 'unlink' removes an existing fact from this row's subject
+ * page, without changing or deleting the fact. It can't unlink a fact
+ * from the page that owns it: move ownership first with a primary row
+ * for another subject, then unlink the old page.
  *
  * link_type 'also' shows an EXISTING fact on this row's subject as well,
  * without changing the fact. Only the hierarchy slugs and fact_key are
@@ -69,7 +82,7 @@ $categoryCache = [];
 $subcategoryCache = [];
 $subjectCache = [];
 
-$stats = ['created' => 0, 'changed' => 0, 'unchanged' => 0, 'linked' => 0, 'errors' => 0];
+$stats = ['created' => 0, 'changed' => 0, 'unchanged' => 0, 'linked' => 0, 'unlinked' => 0, 'errors' => 0];
 
 $handle = fopen($csvPath, 'r');
 if ($handle === false) {
@@ -129,6 +142,12 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             }
             $categoryId = $categoryCache[$catCacheKey];
 
+            // Filled-in cells update an existing category (blank cells are ignored).
+            updateFilledColumns($pdo, 'categories', $categoryId, [
+                'name'        => $get('category_name'),
+                'description' => $get('category_description'),
+            ]);
+
             $subcategorySlug = $get('subcategory_slug');
             if ($subcategorySlug === '') {
                 throw new RuntimeException('subcategory_slug is required');
@@ -141,6 +160,11 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             }
             $subcategoryId = $subcategoryCache[$subcatCacheKey];
 
+            updateFilledColumns($pdo, 'subcategories', $subcategoryId, [
+                'name'        => $get('subcategory_name'),
+                'description' => $get('subcategory_description'),
+            ]);
+
             $subjectSlug = $get('subject_slug');
             if ($subjectSlug === '') {
                 throw new RuntimeException('subject_slug is required');
@@ -152,9 +176,15 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             }
             $subjectId = $subjectCache[$subjectSlug];
 
-            // SEO fields are applied whenever they're filled in, so they
-            // can be added to existing subjects later from the spreadsheet.
-            updateSubjectMeta($pdo, $subjectId, $get('subject_meta_title'), $get('subject_meta_description'));
+            // Name, intro and SEO fields are applied whenever they're filled
+            // in, so existing subjects can be edited from the spreadsheet.
+            updateFilledColumns($pdo, 'subjects', $subjectId, [
+                'name'             => $get('subject_name'),
+                'intro'            => $get('subject_intro'),
+                'meta_title'       => $get('subject_meta_title'),
+                'meta_description' => $get('subject_meta_description'),
+            ]);
+            updateSubjectStatus($pdo, $subjectId, $get('subject_status'));
 
             $factKey = $get('fact_key');
             if ($factKey === '') {
@@ -162,6 +192,19 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             }
 
             $linkType = strtolower($get('link_type') ?: 'primary');
+
+            // --- 'unlink' rows: take a fact off this page ---
+            if ($linkType === 'unlink') {
+                $factId = findFactIdByKey($pdo, $factKey);
+                if (!$factId) {
+                    throw new RuntimeException("fact '$factKey' doesn't exist, so there's nothing to unlink");
+                }
+                $removed = unlinkFactFromSubject($pdo, $subjectId, $factId);
+                if ($removed) {
+                    $stats['unlinked']++;
+                }
+                return ($removed ? 'unlinked' : 'already not linked:') . " fact '$factKey' from '$subjectSlug'";
+            }
 
             // --- 'also' rows: show an existing fact on another page ---
             if ($linkType === 'also') {
@@ -175,7 +218,7 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             }
 
             if ($linkType !== 'primary') {
-                throw new RuntimeException("link_type must be 'primary' or 'also', got '$linkType'");
+                throw new RuntimeException("link_type must be 'primary', 'also' or 'unlink', got '$linkType'");
             }
 
             // --- 'primary' rows: create or update the fact itself ---
@@ -280,7 +323,8 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
 fclose($handle);
 
 echo "\nDone. {$stats['created']} created, {$stats['changed']} changed, "
-    . "{$stats['unchanged']} unchanged, {$stats['linked']} linked, {$stats['errors']} errors.\n";
+    . "{$stats['unchanged']} unchanged, {$stats['linked']} linked, {$stats['unlinked']} unlinked, "
+    . "{$stats['errors']} errors.\n";
 exit($stats['errors'] > 0 ? 1 : 0);
 
 // ============================================================
@@ -372,17 +416,69 @@ function getOrCreateSubject(PDO $pdo, int $subcategoryId, string $slug, string $
 }
 
 /**
- * Only filled-in cells are written, so a blank cell never wipes an SEO
- * field that was set earlier.
+ * Update only the columns whose cell was filled in, so a blank cell never
+ * wipes something that was set earlier. $table must be one of the three
+ * hierarchy tables, and the column names come from this script, never
+ * from the CSV, so nothing user-supplied reaches the SQL itself.
  */
-function updateSubjectMeta(PDO $pdo, int $subjectId, string $metaTitle, string $metaDescription): void
+function updateFilledColumns(PDO $pdo, string $table, int $id, array $fields): void
 {
-    if ($metaTitle !== '') {
-        $stmt = $pdo->prepare('UPDATE subjects SET meta_title = :t WHERE id = :id');
-        $stmt->execute(['t' => $metaTitle, 'id' => $subjectId]);
+    if (!in_array($table, ['categories', 'subcategories', 'subjects'], true)) {
+        throw new InvalidArgumentException("Unexpected table '$table'");
     }
-    if ($metaDescription !== '') {
-        $stmt = $pdo->prepare('UPDATE subjects SET meta_description = :d WHERE id = :id');
-        $stmt->execute(['d' => $metaDescription, 'id' => $subjectId]);
+
+    $fields = array_filter($fields, fn($value) => $value !== '');
+    if (!$fields) {
+        return;
     }
+
+    $sets = implode(', ', array_map(fn($column) => "$column = :$column", array_keys($fields)));
+    $stmt = $pdo->prepare("UPDATE $table SET $sets WHERE id = :id");
+    $stmt->execute($fields + ['id' => $id]);
+}
+
+/**
+ * Set a subject's status from the subject_status column, if filled in.
+ * Publishing also stamps published_at the first time, so the date a page
+ * went live is kept even if it's later unpublished and republished.
+ */
+function updateSubjectStatus(PDO $pdo, int $subjectId, string $status): void
+{
+    if ($status === '') {
+        return;
+    }
+
+    $status = strtolower($status);
+    if (!in_array($status, ['draft', 'published', 'retired'], true)) {
+        throw new RuntimeException("subject_status must be draft, published or retired, got '$status'");
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE subjects
+         SET status = :status,
+             published_at = CASE WHEN :status2 = 'published' AND published_at IS NULL THEN NOW() ELSE published_at END
+         WHERE id = :id"
+    );
+    $stmt->execute(['status' => $status, 'status2' => $status, 'id' => $subjectId]);
+}
+
+/**
+ * Remove a fact from a subject page. Refuses to remove it from its owner
+ * page, because every fact must be shown on the page that owns it.
+ * Returns true if a link was removed, false if there wasn't one.
+ */
+function unlinkFactFromSubject(PDO $pdo, int $subjectId, int $factId): bool
+{
+    $stmt = $pdo->prepare('SELECT primary_subject_id FROM facts WHERE id = :id');
+    $stmt->execute(['id' => $factId]);
+    if ((int) $stmt->fetchColumn() === $subjectId) {
+        throw new RuntimeException(
+            "this page owns the fact, so it can't be unlinked. Give it a new owner with a primary row first"
+        );
+    }
+
+    $stmt = $pdo->prepare('DELETE FROM subject_facts WHERE subject_id = :sid AND fact_id = :fid');
+    $stmt->execute(['sid' => $subjectId, 'fid' => $factId]);
+
+    return $stmt->rowCount() > 0;
 }
