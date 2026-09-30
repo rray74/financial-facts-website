@@ -1,3 +1,12 @@
-config/database.local.php
+# Node modules and system files
 node_modules/
+
+# macOS system file
 .DS_Store
+
+# Local database configuration
+config/database.local.php
+
+# Ignore sensitive and unnecessary files
+public/admin/.htaccess
+public/admin/.htpasswd
