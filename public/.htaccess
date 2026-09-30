@@ -8,7 +8,9 @@
 # ------------------------------------------------------------
 # Clean URLs
 #
-# Public paths start with a two-letter country prefix:
+# Information pages (/about/ and so on), sitemap.xml and robots.txt
+# are mapped first. All other public paths start with a two-letter
+# country prefix:
 #   /uk/                                    index.php        (country home)
 #   /uk/mortgages/                          category.php
 #   /uk/mortgages/fixed-rate/               subcategory.php
@@ -28,6 +30,14 @@
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d
     RewriteRule ^ - [L]
+
+    # --- Site files and information pages ---
+    RewriteRule ^sitemap\.xml$ sitemap.php [L]
+    RewriteRule ^robots\.txt$ robots.php [L]
+    RewriteRule ^about/?$ about.php [L,QSA]
+    RewriteRule ^how-we-check-our-figures/?$ how-we-check.php [L,QSA]
+    RewriteRule ^disclaimer/?$ disclaimer.php [L,QSA]
+    RewriteRule ^privacy/?$ privacy.php [L,QSA]
 
     # --- Country URLs ---
     RewriteRule ^([a-z]{2})/?$ index.php?country=$1 [L,QSA]
