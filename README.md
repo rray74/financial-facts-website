@@ -228,3 +228,4 @@ npm run watch         # rebuilds both on file change, for local dev
   files are really a fallback/local-dev convenience there.
 - If using Option A, run `npm run build` and commit the result before
   pushing — hPanel's Git deploy won't build anything for you.
+# financial-facts-website
