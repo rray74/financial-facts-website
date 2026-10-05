@@ -1,44 +1,59 @@
+# Deploys the site to Hostinger every time you push to `main`
+# (e.g. Commit and Sync/Push in VS Code's Source Control panel).
+#
+# How it works: GitHub connects to the Hostinger server over SSH and runs
+# `git pull` in the app folder, then applies any new database migrations.
+# Nothing is copied or deleted on the server except files tracked in Git,
+# so server-only files (config/database.local.php, the admin .htaccess and
+# .htpasswd) are never touched.
+#
+# One-time setup: see README → "Deploying to Hostinger" →
+# "Automatic deploys from VS Code". It needs these repository secrets:
+#   HOSTINGER_HOST      SSH host from hPanel → Advanced → SSH Access
+#   HOSTINGER_PORT      SSH port from the same page
+#   HOSTINGER_USER      SSH username from the same page
+#   HOSTINGER_SSH_KEY   private key whose public half is added in hPanel
+#   HOSTINGER_APP_PATH  full path to the app folder, e.g.
+#                       /home/u123456789/domains/yourdomain.com/app
+
 name: Deploy to Hostinger
 
 on:
   push:
     branches: [main]
+  # Adds a "Run workflow" button on GitHub's Actions tab, to redeploy
+  # without pushing anything new.
+  workflow_dispatch:
+
+# Never run two deploys at once. A newer push waits for the current one.
+concurrency:
+  group: deploy-hostinger
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Pull latest code on Hostinger and run migrations
+        uses: appleboy/ssh-action@v1.2.0
         with:
-          node-version: '20'
+          host: ${{ secrets.HOSTINGER_HOST }}
+          port: ${{ secrets.HOSTINGER_PORT }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          script: |
+            # Stop at the first failure, so a broken step shows as a
+            # failed deploy (red cross on GitHub) instead of passing quietly.
+            set -e
 
-      - name: Install dependencies
-        run: npm ci
+            cd "${{ secrets.HOSTINGER_APP_PATH }}"
 
-      - name: Build CSS/JS
-        run: npm run build
+            # --ff-only refuses to merge, so if files on the server were
+            # ever edited by hand the deploy stops instead of mixing them in.
+            git pull --ff-only origin main
 
-      - name: Deploy via rsync over SSH
-        uses: burnett01/rsync-deployments@7.0.1
-        with:
-          switches: -avzr --delete --exclude='.git*' --exclude='node_modules' --exclude='config/database.local.php'
-          path: ./
-          remote_path: ${{ secrets.HOSTINGER_PATH }}
-          remote_host: ${{ secrets.HOSTINGER_HOST }}
-          remote_port: ${{ secrets.HOSTINGER_PORT }}
-          remote_user: ${{ secrets.HOSTINGER_USER }}
-          remote_key: ${{ secrets.HOSTINGER_SSH_KEY }}
+            # Applies only migrations that haven't run yet. On a normal
+            # deploy this prints "Nothing to migrate".
+            php scripts/migrate.php
 
-# Notes:
-# - --delete removes files on the server that no longer exist in the repo.
-#   That's usually what you want, but be aware it applies to everything
-#   under remote_path except the excluded config file.
-# - config/database.local.php is excluded so the real DB password, which
-#   only ever exists on the server, is never touched by a deploy.
-# - Required repo secrets (Settings > Secrets and variables > Actions):
-#     HOSTINGER_HOST, HOSTINGER_PORT, HOSTINGER_USER,
-#     HOSTINGER_SSH_KEY (private key), HOSTINGER_PATH
+            echo "Deployed commit $(git rev-parse --short HEAD)"

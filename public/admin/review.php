@@ -1,10 +1,11 @@
 <?php
-// This directory is password-protected via .htaccess/.htpasswd (see
-// README "Fact update procedure" for setup) — nothing here does its own
-// authentication, so it must never be reachable without that in place.
-
 require_once __DIR__ . '/../../includes/functions.php';
 require_once __DIR__ . '/../../includes/fact-writer.php';
+require_once __DIR__ . '/../../includes/admin-auth.php';
+
+// Must be first: sends anyone not logged in to /admin/login.php. It also
+// starts the admin session that the code below uses.
+requireAdmin();
 
 // Session is used for a CSRF token (so another site can't submit these
 // forms on your behalf while you're logged in) and for the one-off
@@ -86,7 +87,10 @@ include __DIR__ . '/../../includes/header.php';
 ?>
 
 <section class="mb-8">
-    <h1 class="font-display text-3xl font-semibold mb-2">Facts Due for Review</h1>
+    <div class="flex items-baseline justify-between">
+        <h1 class="font-display text-3xl font-semibold mb-2">Facts Due for Review</h1>
+        <a href="/admin/logout.php" class="text-sm text-secondary hover:text-accent">Log out</a>
+    </div>
     <p class="opacity-80 max-w-xl">
         Facts not checked within their own <code class="font-mono text-sm">review_frequency_days</code>
         window, most overdue first. Being listed here means it's time to check the
