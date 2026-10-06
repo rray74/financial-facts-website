@@ -1,6 +1,0 @@
-Deploy test for financial-facts.com.
-
-If you can read this at https://financial-facts.com/deploy-test.txt,
-pushing from VS Code deployed it automatically through GitHub Actions.
-
-This file is temporary. Delete it and push again once the test passes.
