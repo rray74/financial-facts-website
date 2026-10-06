@@ -232,9 +232,14 @@ include __DIR__ . '/../../includes/header.php';
                     </td>
                     <td class="py-3 pr-4 fact-value font-semibold"><?= e(formatFactValue($fact)) ?></td>
                     <td class="py-3 pr-4 text-xs">
-                        <?= $fact['check_result'] === 'source_error'
-                            ? 'Source page could not be opened'
-                            : 'Not found on the source page' ?>
+                        <?php if ($fact['check_result'] === 'source_error'): ?>
+                        Source page could not be opened
+                        <?php elseif ($fact['check_note'] === 'tax_year_ended'): ?>
+                        <?php // Year-specific figures need the new year's value, and often a new source page. ?>
+                        Tax year <?= e((string) $fact['tax_year']) ?> has ended. Enter the new year's figure
+                        <?php else: ?>
+                        Not found on the source page
+                        <?php endif; ?>
                         <span class="block opacity-60"><?= date('j M Y', strtotime($fact['checked_at'])) ?></span>
                     </td>
                     <td class="py-3 pr-4">

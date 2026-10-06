@@ -505,7 +505,7 @@ function getFactsNeedingAttention(): array
 {
     $pdo = getDbConnection();
     return $pdo->query(
-        "SELECT f.*, fc.result AS check_result, fc.checked_at,
+        "SELECT f.*, fc.result AS check_result, fc.observed_value AS check_note, fc.checked_at,
                 src.publisher AS source_name, src.url AS source_url, src.is_allowlisted AS source_allowlisted
          FROM facts f
          JOIN (SELECT fact_id, MAX(id) AS latest_id FROM fact_checks GROUP BY fact_id) latest
