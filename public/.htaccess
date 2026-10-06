@@ -25,6 +25,18 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
+    # --- One address for the whole site ---
+    # Permanently redirect www.financial-facts.com to financial-facts.com,
+    # keeping the rest of the address (path and any query string), so
+    # links and rankings are never split between two versions of the site.
+    # Comes before everything else so it applies to real files too.
+    # Local development hosts (e.g. financial-facts:8888) don't start with
+    # www, so they're unaffected. HTTPS itself is enforced by Hostinger's
+    # "Force HTTPS" setting rather than here, because Hostinger's CDN
+    # handles the secure connection before requests reach this file.
+    RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+    RewriteRule ^ https://%1%{REQUEST_URI} [R=301,L]
+
     # Real files and folders (assets/, admin/, and direct hits on the
     # .php pages) are served as they are, never rewritten.
     RewriteCond %{REQUEST_FILENAME} -f [OR]
