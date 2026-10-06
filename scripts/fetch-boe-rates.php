@@ -1,7 +1,7 @@
 <?php
 /**
- * Fetches average mortgage rates from the Bank of England's statistical
- * database and updates (or confirms) the matching facts.
+ * Fetches average mortgage and cash ISA rates from the Bank of England's
+ * statistical database and updates (or confirms) the matching facts.
  *
  * Usage, from the project root:
  *   php scripts/fetch-boe-rates.php --dry-run   show what would change, write nothing
@@ -92,6 +92,41 @@ const BOE_SERIES = [
             'subject_slug' => 'standard-variable-rate',
             'label'        => 'Average standard variable rate (SVR)',
             'replaces'     => 'avg_svr',
+        ],
+    ],
+
+    // Cash ISA averages, shown on the ISA allowance page. Rates include
+    // unconditional bonuses, matching the headline rates savers see
+    // advertised.
+    'boe_cash_isa_variable' => [
+        'code'       => 'IUMB6VL',
+        'match'      => ['/variable[\s-]*rate cash ISA/i', '/including unconditional/i'],
+        'max_change' => 0.5,
+        'context'    => 'Bank of England average of the rates UK banks and building societies advertised on variable-rate (easy access) cash ISAs in %s, including bonuses. Individual accounts vary widely around this.',
+        'create'     => [
+            'subject_slug' => 'cash-isa-allowance',
+            'label'        => 'Average variable-rate cash ISA rate',
+            'replaces'     => 'avg_easy_access_isa',
+        ],
+    ],
+    'boe_cash_isa_1yr_fixed' => [
+        'code'       => 'IUMB6VN',
+        'match'      => ['/(one|1)[\s-]*year fixed[\s-]*rate cash ISA/i'],
+        'max_change' => 0.5,
+        'context'    => 'Bank of England average of the rates advertised on 1-year fixed-rate cash ISAs in %s. Your money is tied up for the year in return for a guaranteed rate.',
+        'create'     => [
+            'subject_slug' => 'cash-isa-allowance',
+            'label'        => 'Average 1-year fixed cash ISA rate',
+        ],
+    ],
+    'boe_cash_isa_2yr_fixed' => [
+        'code'       => 'IUMZID2',
+        'match'      => ['/(two|2)[\s-]*year fixed[\s-]*rate cash ISA/i'],
+        'max_change' => 0.5,
+        'context'    => 'Bank of England average of the rates advertised on 2-year fixed-rate cash ISAs in %s.',
+        'create'     => [
+            'subject_slug' => 'cash-isa-allowance',
+            'label'        => 'Average 2-year fixed cash ISA rate',
         ],
     ],
 ];
