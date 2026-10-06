@@ -1,4 +1,1 @@
-(() => {
-  // src/main.js
-  console.log("Financial Facts \u2014 JS bundle loaded");
-})();
+(()=>{console.log("Financial Facts \u2014 JS bundle loaded");})();
