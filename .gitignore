@@ -7,6 +7,4 @@ node_modules/
 # Local database configuration
 config/database.local.php
 
-# Ignore sensitive and unnecessary files
-public/admin/.htaccess
-public/admin/.htpasswd
+
