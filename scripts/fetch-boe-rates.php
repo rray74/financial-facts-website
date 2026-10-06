@@ -98,16 +98,14 @@ const BOE_SERIES = [
     // Cash ISA averages, shown on the ISA allowance page. Rates include
     // unconditional bonuses, matching the headline rates savers see
     // advertised.
-    'boe_cash_isa_variable' => [
+    // The site's existing easy-access ISA figure was already taken from
+    // this Bank of England series, so the job maintains that fact rather
+    // than replacing it, keeping its history and label.
+    'avg_easy_access_isa' => [
         'code'       => 'IUMB6VL',
         'match'      => ['/variable[\s-]*rate cash ISA/i', '/including unconditional/i'],
         'max_change' => 0.5,
         'context'    => 'Bank of England average of the rates UK banks and building societies advertised on variable-rate (easy access) cash ISAs in %s, including bonuses. Individual accounts vary widely around this.',
-        'create'     => [
-            'subject_slug' => 'cash-isa-allowance',
-            'label'        => 'Average variable-rate cash ISA rate',
-            'replaces'     => 'avg_easy_access_isa',
-        ],
     ],
     'boe_cash_isa_1yr_fixed' => [
         'code'       => 'IUMB6VN',
