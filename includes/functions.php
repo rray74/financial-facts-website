@@ -496,6 +496,28 @@ function getFactsDueForReview(): array
 }
 
 /**
+ * Published facts whose most recent check failed: the figure couldn't be
+ * found on its source page any more, or the page couldn't be reached.
+ * Powers the "Needs a look" section of the review page. Confirming or
+ * updating a fact there records a newer check, which clears it.
+ */
+function getFactsNeedingAttention(): array
+{
+    $pdo = getDbConnection();
+    return $pdo->query(
+        "SELECT f.*, fc.result AS check_result, fc.checked_at,
+                src.publisher AS source_name, src.url AS source_url, src.is_allowlisted AS source_allowlisted
+         FROM facts f
+         JOIN (SELECT fact_id, MAX(id) AS latest_id FROM fact_checks GROUP BY fact_id) latest
+              ON latest.fact_id = f.id
+         JOIN fact_checks fc ON fc.id = latest.latest_id
+         LEFT JOIN sources src ON src.id = f.source_id
+         WHERE f.status = 'published' AND fc.result IN ('not_found', 'source_error')
+         ORDER BY fc.result DESC, src.publisher, f.label"
+    )->fetchAll();
+}
+
+/**
  * Proposed changes that failed an automated safety check (for example an
  * unusually large jump) and are waiting for a decision on the review
  * page. Oldest first.

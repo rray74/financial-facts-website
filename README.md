@@ -281,6 +281,35 @@ publishes these figures monthly, so most weekly runs simply confirm the
 current figures, which keeps their "checked" dates fresh. Every run is
 logged in the `cron_runs` table.
 
+### Official source pages (`scripts/check-sources.php`)
+
+Opens every allowlisted source page cited by a published figure (GOV.UK,
+HMRC, DWP, the Scottish and Welsh governments, NS&I and so on) and checks
+each figure still appears on its page. Figures it finds are marked as
+verified. Figures it can't find, and pages that can't be opened, appear
+under **Needs a look** at the top of `/admin/review.php`, with Still
+correct and Update buttons. It never changes a figure itself: a missing
+figure usually means the page now shows a new value, which needs a
+person to confirm.
+
+Bank of England data figures are skipped, since the job above checks
+those. Text facts (non-numbers) aren't checked.
+
+```bash
+php scripts/check-sources.php --dry-run   # report only, write nothing
+php scripts/check-sources.php             # check and record results
+```
+
+**Scheduled run (once):** add a second cron job in hPanel with this
+command, weekly on Mondays at 07:30 (`30 7 * * 1`):
+
+```
+/usr/bin/php /home/u888389356/domains/financial-facts.com/app/scripts/check-sources.php
+```
+
+After a Budget or at the start of a tax year, run it by hand straight
+away to see which figures need updating.
+
 ## Adding content
 
 All content goes in through the CSV importer, never by editing the

@@ -117,6 +117,7 @@ $pageTitle = 'Facts Due for Review';
 $noindex = true; // admin page, keep it out of search results
 $dueFacts = getFactsDueForReview();
 $heldChanges = getHeldChanges();
+$needsAttention = getFactsNeedingAttention();
 $overlaps = getOverlappingSubjects(0.5);
 
 include __DIR__ . '/../../includes/header.php';
@@ -188,6 +189,70 @@ include __DIR__ . '/../../includes/header.php';
                             <input type="hidden" name="change_id" value="<?= (int) $change['id'] ?>">
                             <button type="submit" name="action" value="approve_change" class="btn btn-xs btn-primary">Approve</button>
                             <button type="submit" name="action" value="reject_change" class="btn btn-xs btn-outline">Reject</button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</section>
+<?php endif; ?>
+
+<?php // Figures the weekly source check couldn't find on their source page (scripts/check-sources.php). ?>
+<?php if (!empty($needsAttention)): ?>
+<section class="mb-12">
+    <h2 class="font-display text-2xl font-semibold mb-2">Needs a look</h2>
+    <p class="opacity-80 max-w-xl mb-4">
+        The weekly check couldn't find these figures on their source pages, usually because the page
+        now shows a new value. Open the source, then confirm the figure or enter the new one.
+    </p>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="border-b-2 border-primary text-left font-mono text-xs uppercase tracking-wide">
+                    <th class="py-2 pr-4">Fact</th>
+                    <th class="py-2 pr-4">Current value</th>
+                    <th class="py-2 pr-4">Problem</th>
+                    <th class="py-2 pr-4">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($needsAttention as $fact): ?>
+                <tr class="border-b border-primary/20 align-top">
+                    <td class="py-3 pr-4">
+                        <a href="<?= e(subjectUrlById((int) $fact['primary_subject_id'])) ?>" target="_blank" class="hover:text-accent">
+                            <?= e($fact['label']) ?>
+                        </a>
+                        <span class="block font-mono text-xs opacity-50"><?= e($fact['fact_key']) ?></span>
+                        <?php if ($fact['source_url']): ?>
+                        <a href="<?= e($fact['source_url']) ?>" target="_blank" rel="noopener"
+                            class="block text-xs text-secondary underline hover:text-accent"><?= e($fact['source_name'] ?? 'Source') ?> &#8599;</a>
+                        <?php endif; ?>
+                    </td>
+                    <td class="py-3 pr-4 fact-value font-semibold"><?= e(formatFactValue($fact)) ?></td>
+                    <td class="py-3 pr-4 text-xs">
+                        <?= $fact['check_result'] === 'source_error'
+                            ? 'Source page could not be opened'
+                            : 'Not found on the source page' ?>
+                        <span class="block opacity-60"><?= date('j M Y', strtotime($fact['checked_at'])) ?></span>
+                    </td>
+                    <td class="py-3 pr-4">
+                        <form method="post" class="mb-2">
+                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                            <input type="hidden" name="fact_id" value="<?= (int) $fact['id'] ?>">
+                            <input type="hidden" name="action" value="verify">
+                            <button type="submit" class="btn btn-xs btn-outline">Still correct</button>
+                        </form>
+                        <form method="post" class="flex flex-wrap gap-1 items-center">
+                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                            <input type="hidden" name="fact_id" value="<?= (int) $fact['id'] ?>">
+                            <input type="hidden" name="action" value="update">
+                            <input type="text" name="new_value" placeholder="New value" required
+                                class="input input-xs input-bordered w-24">
+                            <input type="date" name="effective_from" title="Effective from (optional)"
+                                class="input input-xs input-bordered">
+                            <button type="submit" class="btn btn-xs btn-primary">Update</button>
                         </form>
                     </td>
                 </tr>
