@@ -496,6 +496,27 @@ function getFactsDueForReview(): array
 }
 
 /**
+ * Proposed changes that failed an automated safety check (for example an
+ * unusually large jump) and are waiting for a decision on the review
+ * page. Oldest first.
+ */
+function getHeldChanges(): array
+{
+    $pdo = getDbConnection();
+    return $pdo->query(
+        "SELECT fc.id, fc.fact_id, fc.proposed_value, fc.proposed_value_numeric, fc.evidence_snippet,
+                fc.status_reason, fc.created_at,
+                f.label, f.value, f.value_numeric, f.value_type, f.unit, f.primary_subject_id,
+                src.publisher AS source_name, src.url AS source_url
+         FROM fact_changes fc
+         JOIN facts f ON f.id = fc.fact_id
+         LEFT JOIN sources src ON src.id = fc.source_id
+         WHERE fc.status = 'held'
+         ORDER BY fc.created_at ASC"
+    )->fetchAll();
+}
+
+/**
  * Pairs of published subjects that share a large part of their facts.
  * Heavy overlap means two pages compete for the same searches and can
  * look thin, so these are worth differentiating or merging.

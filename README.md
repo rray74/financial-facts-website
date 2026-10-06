@@ -246,6 +246,41 @@ php scripts/import-facts.php data/imports/your-file.csv
 If GitHub Actions is ever unavailable, deploy by hand over SSH with
 `git pull` in the same folder.
 
+## Automated jobs
+
+### Bank of England mortgage rates (`scripts/fetch-boe-rates.php`)
+
+Fetches the Bank of England's average quoted mortgage rates (2-year fixed
+at 75%, 90% and 95% LTV, 5-year fixed at 75%, and the average SVR)
+straight from the Bank's statistical database, then updates the matching
+facts, or marks them as verified if unchanged. The series it maintains are
+listed at the top of the script.
+
+Before writing anything, every figure must pass three checks: the Bank's
+own description of the series must match what's expected, the value
+must be a plausible rate, and the change since last time must be within a
+set limit. Anything failing the last check is **held for review** and
+appears at the top of `/admin/review.php` with Approve and Reject buttons.
+
+Run it by hand over SSH, from the `app` folder:
+
+```bash
+php scripts/fetch-boe-rates.php --dry-run   # show what would change, write nothing
+php scripts/fetch-boe-rates.php             # fetch and apply
+```
+
+**Scheduled run (once):** hPanel → Advanced → **Cron Jobs**. Create a
+custom cron job with this command:
+
+```
+/usr/bin/php /home/u888389356/domains/financial-facts.com/app/scripts/fetch-boe-rates.php
+```
+
+Set it to run weekly, for example Mondays at 07:00 (`0 7 * * 1`). The Bank
+publishes these figures monthly, so most weekly runs simply confirm the
+current figures, which keeps their "checked" dates fresh. Every run is
+logged in the `cron_runs` table.
+
 ## Adding content
 
 All content goes in through the CSV importer, never by editing the

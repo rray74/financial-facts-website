@@ -26,17 +26,52 @@ if (empty($_SESSION['csrf_token'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     $factId = (int) ($_POST['fact_id'] ?? 0);
+    $changeId = (int) ($_POST['change_id'] ?? 0);
     $action = $_POST['action'] ?? '';
 
     try {
         if (!hash_equals($_SESSION['csrf_token'], $token)) {
             throw new RuntimeException('Form expired. Please try again.');
         }
+
+        $pdo = getDbConnection();
+
+        if ($action === 'approve_change' || $action === 'reject_change') {
+            // Held changes from the pipeline (see "Held for review" below).
+            $stmt = $pdo->prepare("SELECT * FROM fact_changes WHERE id = :id AND status = 'held'");
+            $stmt->execute(['id' => $changeId]);
+            $change = $stmt->fetch();
+            if (!$change) {
+                throw new RuntimeException('That change has already been dealt with.');
+            }
+
+            if ($action === 'approve_change') {
+                // Publish through updateFactValue(), so it's recorded in the
+                // fact's history and linked back to this proposal.
+                withTransaction($pdo, function () use ($pdo, $change) {
+                    updateFactValue($pdo, (int) $change['fact_id'], $change['proposed_value'], [
+                        'change_source'  => 'pipeline',
+                        'fact_change_id' => (int) $change['id'],
+                        'note'           => 'Approved on the review page',
+                    ]);
+                    $pdo->prepare(
+                        "UPDATE fact_changes SET status = 'applied', decided_at = NOW(), applied_at = NOW() WHERE id = :id"
+                    )->execute(['id' => $change['id']]);
+                });
+                $_SESSION['flash'] = ['type' => 'success', 'text' => 'Change approved and published.'];
+            } else {
+                $pdo->prepare("UPDATE fact_changes SET status = 'rejected', decided_at = NOW() WHERE id = :id")
+                    ->execute(['id' => $change['id']]);
+                $_SESSION['flash'] = ['type' => 'info', 'text' => 'Change rejected. The current figure stays.'];
+            }
+
+            header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?'));
+            exit;
+        }
+
         if ($factId <= 0) {
             throw new RuntimeException('No fact selected.');
         }
-
-        $pdo = getDbConnection();
 
         if ($action === 'verify') {
             // Figure checked and still correct, so just reset the review window.
@@ -81,6 +116,7 @@ unset($_SESSION['flash']);
 $pageTitle = 'Facts Due for Review';
 $noindex = true; // admin page, keep it out of search results
 $dueFacts = getFactsDueForReview();
+$heldChanges = getHeldChanges();
 $overlaps = getOverlappingSubjects(0.5);
 
 include __DIR__ . '/../../includes/header.php';
@@ -104,6 +140,62 @@ include __DIR__ . '/../../includes/header.php';
     class="alert <?= $flash['type'] === 'error' ? 'alert-error' : ($flash['type'] === 'info' ? 'alert-info' : 'alert-success') ?> mb-6">
     <span><?= e($flash['text']) ?></span>
 </div>
+<?php endif; ?>
+
+<?php // Changes the pipeline found but didn't publish, because they failed a safety check. ?>
+<?php if (!empty($heldChanges)): ?>
+<section class="mb-12">
+    <h2 class="font-display text-2xl font-semibold mb-2">Held for review</h2>
+    <p class="opacity-80 max-w-xl mb-4">
+        New figures the automated checks didn't publish, usually because the change was unusually
+        large. Check the source, then approve to publish or reject to keep the current figure.
+    </p>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="border-b-2 border-primary text-left font-mono text-xs uppercase tracking-wide">
+                    <th class="py-2 pr-4">Fact</th>
+                    <th class="py-2 pr-4">Current</th>
+                    <th class="py-2 pr-4">Proposed</th>
+                    <th class="py-2 pr-4">Why held</th>
+                    <th class="py-2 pr-4">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($heldChanges as $change): ?>
+                <tr class="border-b border-primary/20 align-top">
+                    <td class="py-3 pr-4">
+                        <a href="<?= e(subjectUrlById((int) $change['primary_subject_id'])) ?>" target="_blank" class="hover:text-accent">
+                            <?= e($change['label']) ?>
+                        </a>
+                        <?php if ($change['source_url']): ?>
+                        <a href="<?= e($change['source_url']) ?>" target="_blank" rel="noopener"
+                            class="block text-xs text-secondary underline hover:text-accent"><?= e($change['source_name'] ?? 'Source') ?> &#8599;</a>
+                        <?php endif; ?>
+                    </td>
+                    <td class="py-3 pr-4 fact-value"><?= e(formatFactValue($change)) ?></td>
+                    <td class="py-3 pr-4 fact-value font-semibold">
+                        <?= e(formatFactValue(['value' => $change['proposed_value'], 'value_numeric' => $change['proposed_value_numeric'],
+                            'value_type' => $change['value_type'], 'unit' => $change['unit'], 'value_display' => null])) ?>
+                    </td>
+                    <td class="py-3 pr-4 text-xs opacity-80">
+                        <?= e($change['status_reason'] ?? '') ?>
+                        <span class="block opacity-60 mt-1"><?= e($change['evidence_snippet'] ?? '') ?></span>
+                    </td>
+                    <td class="py-3 pr-4">
+                        <form method="post" class="flex gap-1">
+                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                            <input type="hidden" name="change_id" value="<?= (int) $change['id'] ?>">
+                            <button type="submit" name="action" value="approve_change" class="btn btn-xs btn-primary">Approve</button>
+                            <button type="submit" name="action" value="reject_change" class="btn btn-xs btn-outline">Reject</button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</section>
 <?php endif; ?>
 
 <?php if (empty($dueFacts)): ?>
