@@ -30,7 +30,9 @@
  *   value_display            display override, e.g. '£0 to £125,000'
  *   effective_from           YYYY-MM-DD the figure took effect (not in the future)
  *   tax_year                 e.g. 2026/27
- *   status                   draft | published (default published) | retired
+ *   status                   draft | published | retired (new facts default
+ *                            to published; existing facts keep their status
+ *                            unless this is filled in)
  *   subject_meta_title       SEO title for the subject page
  *   subject_meta_description SEO description for the subject page
  *   subject_status           draft | published | retired, to publish, hide
@@ -59,8 +61,12 @@
  * for the fact (e.g. the base rate explained in SVR terms).
  *
  * Required on primary rows: category_slug, subcategory_slug,
- * subject_slug, fact_key, label, value. last_updated is now optional:
- * it's the date the value changed, and defaults to today.
+ * subject_slug and fact_key, plus label and value for a NEW fact.
+ * For an existing fact, every other cell is optional and blank cells
+ * leave that detail unchanged. So, for example, a row with just the
+ * fact's hierarchy slugs, fact_key and status = retired retires it.
+ * last_updated is optional: it's the date the value changed, and
+ * defaults to today.
  */
 
 require_once __DIR__ . '/../config/database.php';
@@ -227,15 +233,12 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             // --- 'primary' rows: create or update the fact itself ---
             $label = $get('label');
             $value = $get('value');
-            if ($label === '' || $value === '') {
-                throw new RuntimeException('label and value are required');
-            }
 
             $lastUpdated = validDateOrNull($get('last_updated'), 'last_updated');
             $effectiveFrom = validDateOrNull($get('effective_from'), 'effective_from');
 
-            $status = strtolower($get('status') ?: 'published');
-            if (!in_array($status, ['draft', 'published', 'retired'], true)) {
+            $status = strtolower($get('status'));
+            if ($status !== '' && !in_array($status, ['draft', 'published', 'retired'], true)) {
                 throw new RuntimeException("status must be draft, published or retired, got '$status'");
             }
 
@@ -244,11 +247,14 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
                 $sourceId = getOrCreateSource($pdo, $get('source_url'), $get('source_name') ?: null, $countryId);
             }
 
-            $reviewDays = $get('review_frequency_days') !== '' ? (int) $get('review_frequency_days') : 90;
-
             $factId = findFactIdByKey($pdo, $factKey);
 
             if (!$factId) {
+                // New facts need a label and value. Status defaults to
+                // published, since you're the one adding them.
+                if ($label === '' || $value === '') {
+                    throw new RuntimeException('label and value are required for a new fact');
+                }
                 $factId = createFact($pdo, [
                     'primary_subject_id'    => $subjectId,
                     'jurisdiction_id'       => (int) $jurisdiction['id'],
@@ -262,8 +268,8 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
                     'last_updated'          => $lastUpdated,
                     'effective_from'        => $effectiveFrom,
                     'tax_year'              => $get('tax_year') ?: null,
-                    'review_frequency_days' => $reviewDays,
-                    'status'                => $status,
+                    'review_frequency_days' => $get('review_frequency_days') !== '' ? (int) $get('review_frequency_days') : 90,
+                    'status'                => $status ?: 'published',
                     'change_source'         => 'import',
                 ]);
                 $stats['created']++;
@@ -273,34 +279,50 @@ while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
                 return "created fact '$factKey'";
             }
 
-            // Existing fact: update its descriptive fields first (so a
-            // changed unit is in place before the value is compared),
-            // then the value through updateFactValue(), which handles
-            // history and verification.
-            $stmt = $pdo->prepare(
-                'UPDATE facts SET
-                    primary_subject_id = :subject_id, jurisdiction_id = :jid, label = :label,
-                    unit = :unit, value_display = :display, context = :context, source_id = :source_id,
-                    review_frequency_days = :review, status = :status
-                 WHERE id = :id'
-            );
-            $stmt->execute([
-                'subject_id' => $subjectId,
-                'jid'        => (int) $jurisdiction['id'],
-                'label'      => $label,
-                'unit'       => $get('unit') ?: null,
-                'display'    => $get('value_display') ?: null,
-                'context'    => $get('context') ?: null,
-                'source_id'  => $sourceId,
-                'review'     => $reviewDays,
-                'status'     => $status,
-                'id'         => $factId,
-            ]);
+            // Existing fact: same rule as categories and subjects, so a
+            // blank cell never changes anything. Only the cells that are
+            // filled in are written, which means a row with just the
+            // fact_key and status = retired retires a fact and leaves
+            // everything else about it untouched.
+            //
+            // Descriptive fields go first, so a changed unit is in place
+            // before the value is compared.
+            $fields = ['primary_subject_id' => $subjectId];
+            if ($label !== '') {
+                $fields['label'] = $label;
+            }
+            if ($get('jurisdiction_code') !== '') {
+                $fields['jurisdiction_id'] = (int) $jurisdiction['id'];
+            }
+            foreach (['unit' => 'unit', 'value_display' => 'value_display', 'context' => 'context'] as $column => $cell) {
+                if ($get($cell) !== '') {
+                    $fields[$column] = $get($cell);
+                }
+            }
+            if ($sourceId !== null) {
+                $fields['source_id'] = $sourceId;
+            }
+            if ($get('review_frequency_days') !== '') {
+                $fields['review_frequency_days'] = (int) $get('review_frequency_days');
+            }
+            if ($status !== '') {
+                $fields['status'] = $status;
+            }
+
+            $sets = implode(', ', array_map(fn($column) => "$column = :$column", array_keys($fields)));
+            $stmt = $pdo->prepare("UPDATE facts SET $sets WHERE id = :id");
+            $stmt->execute($fields + ['id' => $factId]);
 
             // Make sure the owning page shows the fact. If ownership moved,
             // the previous page keeps it as a shared fact. Remove that link
-            // separately if it's no longer wanted.
+            // with an 'unlink' row if it's no longer wanted.
             linkFactToSubject($pdo, $subjectId, $factId);
+
+            // No value in the row means the value isn't being touched, so
+            // it's neither changed nor marked as checked.
+            if ($value === '') {
+                return "updated details of fact '$factKey'" . ($status !== '' ? " (status: $status)" : '');
+            }
 
             $changed = updateFactValue($pdo, $factId, $value, [
                 'change_source'  => 'import',
