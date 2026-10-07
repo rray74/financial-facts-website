@@ -587,6 +587,150 @@ function resolveCountryFromRequest(): ?array
     return $prefix === '' ? getDefaultCountry() : getCountryByPrefix($prefix);
 }
 
+// ------------------------------------------------------------
+// Subject explanations (migration 010)
+//
+// The longer section below the figures on a subject page. It's stored as
+// plain text in a small Markdown-style format and turned into HTML here,
+// so the database never holds raw HTML and everything typed is escaped.
+//
+// Supported (one per line unless noted):
+//   ## Heading            section heading (# and ## both give an h2)
+//   ### Smaller heading   sub-heading (h3)
+//   - item  or  * item    bulleted list
+//   1. item               numbered list
+//   **bold**              inside any line
+//   [text](/uk/tax/)      link, to a page on this site or an https:// address
+//   a blank line          starts a new paragraph
+// ------------------------------------------------------------
+
+/**
+ * Turn an explanation into HTML for the public page. Returns '' for an
+ * empty explanation, so the page can hide the section.
+ */
+function renderExplanation(?string $text): string
+{
+    $text = trim(str_replace(["\r\n", "\r"], "\n", (string) $text));
+    if ($text === '') {
+        return '';
+    }
+
+    $html = [];
+    $paragraph = []; // lines of the paragraph being built
+    $list = null;    // ['type' => 'ul' or 'ol', 'items' => [...]] while in a list
+
+    // Close off the paragraph or list being built and add it to $html.
+    $flushParagraph = function () use (&$paragraph, &$html) {
+        if ($paragraph) {
+            $html[] = '<p class="mb-4">' . renderExplanationInline(implode(' ', $paragraph)) . '</p>';
+            $paragraph = [];
+        }
+    };
+    $flushList = function () use (&$list, &$html) {
+        if ($list) {
+            $class = $list['type'] === 'ul' ? 'list-disc' : 'list-decimal';
+            $items = '';
+            foreach ($list['items'] as $item) {
+                $items .= '<li>' . renderExplanationInline($item) . '</li>';
+            }
+            $html[] = '<' . $list['type'] . ' class="' . $class . ' pl-6 mb-4 space-y-1">' . $items . '</' . $list['type'] . '>';
+            $list = null;
+        }
+    };
+
+    foreach (explode("\n", $text) as $line) {
+        $line = trim($line);
+
+        // Blank line: ends the current paragraph or list.
+        if ($line === '') {
+            $flushParagraph();
+            $flushList();
+            continue;
+        }
+
+        // Headings. The page title is the only h1, so # also gives an h2.
+        if (preg_match('/^(#{1,3})\s+(.+)$/', $line, $m)) {
+            $flushParagraph();
+            $flushList();
+            if (strlen($m[1]) === 3) {
+                $html[] = '<h3 class="font-display text-xl font-semibold mt-6 mb-2">' . renderExplanationInline($m[2]) . '</h3>';
+            } else {
+                $html[] = '<h2 class="font-display text-2xl font-semibold mt-8 mb-3">' . renderExplanationInline($m[2]) . '</h2>';
+            }
+            continue;
+        }
+
+        // List items. "- " or "* " (with a space, so **bold** at the start
+        // of a line isn't mistaken for one), or "1. " / "1) ".
+        $type = null;
+        if (preg_match('/^[-*]\s+(.+)$/', $line, $m)) {
+            $type = 'ul';
+        } elseif (preg_match('/^\d+[.)]\s+(.+)$/', $line, $m)) {
+            $type = 'ol';
+        }
+        if ($type !== null) {
+            $flushParagraph();
+            if ($list !== null && $list['type'] !== $type) {
+                $flushList();
+            }
+            if ($list === null) {
+                $list = ['type' => $type, 'items' => []];
+            }
+            $list['items'][] = $m[1];
+            continue;
+        }
+
+        // Ordinary text: part of a paragraph. Lines next to each other are
+        // joined, so wrapping a long sentence over two lines is fine.
+        $flushList();
+        $paragraph[] = $line;
+    }
+
+    $flushParagraph();
+    $flushList();
+
+    return implode("\n", $html);
+}
+
+/**
+ * Links and bold inside one line of an explanation. Everything else is
+ * escaped. Links are only made for addresses on this site (/uk/...) or
+ * http(s) addresses, so nothing like javascript: can get through. Any
+ * other [text](...) is shown as typed.
+ */
+function renderExplanationInline(string $text): string
+{
+    // Split out [text](url) pieces. With a capture group, the links land at
+    // the odd positions of $parts and the plain text in between at the even.
+    $parts = preg_split('/(\[[^\]]+\]\([^)\s]+\))/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+    $out = '';
+
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 1 && preg_match('/^\[([^\]]+)\]\(([^)\s]+)\)$/', $part, $m)) {
+            $url = $m[2];
+            $internal = str_starts_with($url, '/') && !str_starts_with($url, '//');
+            $external = (bool) preg_match('#^https?://#i', $url);
+
+            if ($internal || $external) {
+                // Other sites open in a new tab, like the source links on the page.
+                $attrs = $external ? ' target="_blank" rel="noopener"' : '';
+                $out .= '<a href="' . e($url) . '"' . $attrs . ' class="underline hover:text-accent">'
+                    . renderExplanationBold(e($m[1])) . '</a>';
+                continue;
+            }
+        }
+        $out .= renderExplanationBold(e($part));
+    }
+
+    return $out;
+}
+
+/** **bold** to <strong>, on text that has already been escaped. */
+function renderExplanationBold(string $escaped): string
+{
+    return preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $escaped);
+}
+
 /**
  * Render an error page (404 Not Found, 410 Gone) inside the normal site
  * layout, then stop. Error pages are marked noindex.

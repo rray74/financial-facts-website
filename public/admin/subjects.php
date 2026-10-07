@@ -177,7 +177,7 @@ include __DIR__ . '/../../includes/admin-nav.php';
                     <th class="py-2 pr-4">Subject</th>
                     <th class="py-2 pr-4">Status</th>
                     <th class="py-2 pr-4">Figures shown</th>
-                    <th class="py-2 pr-4">Intro</th>
+                    <th class="py-2 pr-4">Intro / explanation</th>
                     <th class="py-2 pr-4">Search listing</th>
                 </tr>
             </thead>
@@ -212,6 +212,12 @@ include __DIR__ . '/../../includes/admin-nav.php';
                         <span class="block text-xs opacity-60">short</span>
                         <?php endif; ?>
                         <?php endif; ?>
+                        <?php // The longer section below the figures (migration 010). ?>
+                        <span class="block text-xs <?= (int) $subject['explanation_length'] === 0 ? 'opacity-60' : '' ?>">
+                            <?= (int) $subject['explanation_length'] === 0
+                                ? 'No explanation'
+                                : 'Explanation: ' . number_format((int) $subject['explanation_length']) . ' chars' ?>
+                        </span>
                     </td>
                     <td class="py-3 pr-4 text-xs">
                         <?php // Blank meta fields fall back to the name and intro, which is fine but not tailored. ?>

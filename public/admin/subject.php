@@ -8,8 +8,8 @@ require_once __DIR__ . '/../../includes/admin-queries.php';
 requireAdmin();
 
 /*
- * Edit one subject page: its intro, search listing (meta title and
- * description) and status, plus the label, context and review cadence of
+ * Edit one subject page: its intro, explanation, search listing (meta
+ * title and description) and status, plus the label, context and review cadence of
  * each fact the page owns, and add new facts to it.
  *
  * Fact VALUES aren't edited here. They change on the review page or via
@@ -60,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $returnAnchor = '#subject-details';
             updateSubjectDetails($pdo, $subjectId, [
                 'intro'            => $_POST['intro'] ?? null,
+                'explanation'      => $_POST['explanation'] ?? null,
                 'meta_title'       => $_POST['meta_title'] ?? null,
                 'meta_description' => $_POST['meta_description'] ?? null,
                 'status'           => $_POST['status'] ?? '',
@@ -148,6 +149,7 @@ $jurisdictionOptions = getJurisdictionOptions((int) $subject['country_id']);
 
 $form = [
     'intro'            => $oldSubject['intro'] ?? (string) $subject['intro'],
+    'explanation'      => $oldSubject['explanation'] ?? (string) ($subject['explanation'] ?? ''),
     'meta_title'       => $oldSubject['meta_title'] ?? (string) $subject['meta_title'],
     'meta_description' => $oldSubject['meta_description'] ?? (string) $subject['meta_description'],
     'status'           => $oldSubject['status'] ?? $subject['status'],
@@ -211,6 +213,31 @@ include __DIR__ . '/../../includes/admin-nav.php';
             <textarea id="intro" name="intro" rows="6" class="textarea textarea-bordered w-full"
                 data-counter="intro-count"><?= e($form['intro']) ?></textarea>
             <p id="intro-count" class="text-xs opacity-60 mt-1"></p>
+        </div>
+
+        <div>
+            <label for="explanation" class="block font-semibold mb-1">Explanation</label>
+            <p class="text-xs opacity-70 mb-2">
+                The written guide shown below the figures. Leave blank to hide the section.
+                Formatting: <code class="font-mono">## Heading</code>, <code class="font-mono">### Smaller heading</code>,
+                <code class="font-mono">- bullet</code>, <code class="font-mono">1. numbered</code>,
+                <code class="font-mono">**bold**</code> and <code class="font-mono">[link text](/uk/tax/)</code>.
+                A blank line starts a new paragraph.
+            </p>
+            <textarea id="explanation" name="explanation" rows="16" class="textarea textarea-bordered w-full font-mono text-sm"
+                data-counter="explanation-count"><?= e($form['explanation']) ?></textarea>
+            <p id="explanation-count" class="text-xs opacity-60 mt-1"></p>
+
+            <?php // Preview of the SAVED version, rendered exactly as the public page does it. ?>
+            <?php $savedExplanationHtml = renderExplanation($subject['explanation'] ?? null); ?>
+            <?php if ($savedExplanationHtml !== ''): ?>
+            <details class="mt-3">
+                <summary class="text-sm text-secondary cursor-pointer">Preview (as last saved)</summary>
+                <div class="border border-primary/20 rounded p-5 mt-2 leading-relaxed [&>:first-child]:mt-0">
+                    <?= $savedExplanationHtml ?>
+                </div>
+            </details>
+            <?php endif; ?>
         </div>
 
         <div>

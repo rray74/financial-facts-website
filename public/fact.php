@@ -43,6 +43,11 @@ $facts = getFactsForSubject($subject['id']);
 $workedExamples = getWorkedExamplesForSubject($subject['slug']);
 $changes = getRecentChangesForSubject((int) $subject['id']);
 
+// The longer written explanation (migration 010), edited in the admin.
+// renderExplanation() escapes everything and returns '' when there's
+// none, in which case the section isn't shown.
+$explanationHtml = renderExplanation($subject['explanation'] ?? null);
+
 // Breadcrumb structured data, so search results can show the
 // Category > Subcategory > Page trail instead of a bare URL.
 $breadcrumbJson = json_encode([
@@ -129,6 +134,13 @@ include __DIR__ . '/../includes/header.php';
     </div>
     <?php endforeach; ?>
 </div>
+<?php endif; ?>
+
+<?php // Explanation: the written guide below the figures. Already escaped HTML from renderExplanation(). ?>
+<?php if ($explanationHtml !== ''): ?>
+<section class="mt-14 max-w-2xl leading-relaxed [&>:first-child]:mt-0">
+    <?= $explanationHtml ?>
+</section>
 <?php endif; ?>
 
 <?php // Worked examples: calculated from the live figures above (see includes/worked-examples.php). ?>

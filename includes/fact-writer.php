@@ -521,15 +521,18 @@ function textLength(?string $text): int
 }
 
 /**
- * Save a subject's editable fields from the admin editor: intro, meta
- * title, meta description and status. Name and slug aren't editable
- * here, because changing a slug changes the page's address.
+ * Save a subject's editable fields from the admin editor: intro,
+ * explanation, meta title, meta description and status. Name and slug
+ * aren't editable here, because changing a slug changes the page's
+ * address.
  *
- * $fields keys: intro, meta_title, meta_description, status.
+ * $fields keys: intro, explanation, meta_title, meta_description, status.
+ * The explanation column comes from migration 010.
  */
 function updateSubjectDetails(PDO $pdo, int $subjectId, array $fields): void
 {
     $intro = cleanEditorText($fields['intro'] ?? null);
+    $explanation = cleanEditorText($fields['explanation'] ?? null);
     $metaTitle = cleanEditorText($fields['meta_title'] ?? null, true);
     $metaDescription = cleanEditorText($fields['meta_description'] ?? null, true);
     $status = (string) ($fields['status'] ?? '');
@@ -545,6 +548,11 @@ function updateSubjectDetails(PDO $pdo, int $subjectId, array $fields): void
     if (textLength($metaDescription) > 255) {
         throw new RuntimeException('Meta description is too long (255 characters at most).');
     }
+    // Far more than a page needs (about 3,000 words), but stops a stray
+    // paste of a whole document.
+    if (textLength($explanation) > 20000) {
+        throw new RuntimeException('Explanation is too long (20,000 characters at most).');
+    }
 
     $stmt = $pdo->prepare('SELECT id FROM subjects WHERE id = :id');
     $stmt->execute(['id' => $subjectId]);
@@ -554,11 +562,13 @@ function updateSubjectDetails(PDO $pdo, int $subjectId, array $fields): void
 
     $stmt = $pdo->prepare(
         'UPDATE subjects
-         SET intro = :intro, meta_title = :meta_title, meta_description = :meta_description, status = :status
+         SET intro = :intro, explanation = :explanation, meta_title = :meta_title,
+             meta_description = :meta_description, status = :status
          WHERE id = :id'
     );
     $stmt->execute([
         'intro'            => $intro,
+        'explanation'      => $explanation,
         'meta_title'       => $metaTitle,
         'meta_description' => $metaDescription,
         'status'           => $status,

@@ -106,7 +106,7 @@ function requireAdmin(): void
         && time() - (int) $_SESSION['admin_last_seen'] < ADMIN_IDLE_TIMEOUT_SECONDS;
 
     if (!$loggedIn) {
-        $next = $_SERVER['REQUEST_URI'] ?? '/admin/review.php';
+        $next = $_SERVER['REQUEST_URI'] ?? '/admin/';
         header('Location: /admin/login.php?next=' . rawurlencode($next));
         exit;
     }
@@ -127,7 +127,8 @@ function safeAdminRedirect(?string $next): string
     if (preg_match('#^/admin/[A-Za-z0-9/_.-]*(\?[^\r\n]*)?$#', $next) && strpos($next, '//') === false) {
         return $next;
     }
-    return '/admin/review.php';
+    // The dashboard is the admin home page.
+    return '/admin/';
 }
 
 // ------------------------------------------------------------

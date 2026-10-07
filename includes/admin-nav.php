@@ -4,7 +4,7 @@
  * after header.php on any admin page.
  *
  * Variables a page can set before including this file:
- *   $adminSection   'subjects' or 'review', to highlight that link
+ *   $adminSection   'dashboard', 'subjects' or 'review', to highlight that link
  *
  * Shows the message saved with setAdminFlash() (if any) under the bar,
  * so pages don't each need their own flash markup.
@@ -12,11 +12,11 @@
 $adminSection = $adminSection ?? '';
 $adminFlash = takeAdminFlash();
 
-// Links in the order they appear. The dashboard joins these in the next
-// Phase 1 step.
+// Links in the order they appear.
 $adminLinks = [
-    'subjects' => ['/admin/subjects.php', 'Subjects'],
-    'review'   => ['/admin/review.php', 'Review'],
+    'dashboard' => ['/admin/', 'Dashboard'],
+    'subjects'  => ['/admin/subjects.php', 'Subjects'],
+    'review'    => ['/admin/review.php', 'Review'],
 ];
 ?>
 <nav class="flex flex-wrap gap-5 items-center font-mono text-xs uppercase tracking-wide mb-8 pb-3 border-b border-primary/20">

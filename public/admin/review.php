@@ -110,38 +110,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-$flash = $_SESSION['flash'] ?? null;
-unset($_SESSION['flash']);
+// The message from the last action ($_SESSION['flash']) is now shown by
+// includes/admin-nav.php, which every admin page shares.
 
 $pageTitle = 'Facts Due for Review';
 $noindex = true; // admin page, keep it out of search results
+$adminSection = 'review';
 $dueFacts = getFactsDueForReview();
 $heldChanges = getHeldChanges();
 $needsAttention = getFactsNeedingAttention();
 $overlaps = getOverlappingSubjects(0.5);
 
 include __DIR__ . '/../../includes/header.php';
+include __DIR__ . '/../../includes/admin-nav.php'; // shared admin links, log out and messages
 ?>
 
 <section class="mb-8">
-    <div class="flex items-baseline justify-between">
-        <h1 class="font-display text-3xl font-semibold mb-2">Facts Due for Review</h1>
-        <a href="/admin/logout.php" class="text-sm text-secondary hover:text-accent">Log out</a>
-    </div>
+    <h1 class="font-display text-3xl font-semibold mb-2">Facts Due for Review</h1>
     <p class="opacity-80 max-w-xl">
         Facts not checked within their own <code class="font-mono text-sm">review_frequency_days</code>
         window, most overdue first. Being listed here means it's time to check the
         figure against its source — not necessarily that it's wrong.
     </p>
 </section>
-
-<?php if ($flash): ?>
-<?php // DaisyUI alert colour matches the outcome of the last action. ?>
-<div
-    class="alert <?= $flash['type'] === 'error' ? 'alert-error' : ($flash['type'] === 'info' ? 'alert-info' : 'alert-success') ?> mb-6">
-    <span><?= e($flash['text']) ?></span>
-</div>
-<?php endif; ?>
 
 <?php // Changes the pipeline found but didn't publish, because they failed a safety check. ?>
 <?php if (!empty($heldChanges)): ?>

@@ -20,6 +20,8 @@ function getAdminSubjectList(): array
     $pdo = getDbConnection();
     return $pdo->query(
         "SELECT s.id, s.name, s.slug, s.status, s.intro, s.meta_title, s.meta_description,
+                -- Explanation length in characters (column from migration 010).
+                CHAR_LENGTH(COALESCE(s.explanation, '')) AS explanation_length,
                 sc.name AS subcategory_name, c.name AS category_name, j.code AS country_code,
                 -- Figures the public page actually shows (published facts only).
                 (SELECT COUNT(*) FROM subject_facts sf
@@ -125,4 +127,82 @@ function getJurisdictionOptions(int $countryId): array
     );
     $stmt->execute(['cid' => $countryId, 'cid2' => $countryId]);
     return $stmt->fetchAll();
+}
+
+// ------------------------------------------------------------
+// Dashboard (/admin/index.php)
+// ------------------------------------------------------------
+
+/**
+ * Scheduled scripts the dashboard expects to see in cron_runs, with when
+ * they're meant to run. Both are weekly, so a last run more than 8 days
+ * ago means the cron job has stopped. Add new cron scripts here.
+ */
+const ADMIN_EXPECTED_CRON_SCRIPTS = [
+    'fetch-boe-rates.php' => 'Mondays 07:00',
+    'check-sources.php'   => 'Mondays 07:30',
+];
+const ADMIN_CRON_STALE_DAYS = 8;
+
+/**
+ * The latest cron_runs row for each script, keyed by script name. Uses
+ * SELECT * so it works whatever the start-time column is called; the
+ * dashboard reads started_at or created_at, whichever exists.
+ */
+function getLatestCronRuns(): array
+{
+    $pdo = getDbConnection();
+    $rows = $pdo->query(
+        'SELECT cr.*
+         FROM cron_runs cr
+         JOIN (SELECT script, MAX(id) AS latest_id FROM cron_runs GROUP BY script) latest
+              ON latest.latest_id = cr.id
+         ORDER BY cr.script'
+    )->fetchAll();
+
+    $runs = [];
+    foreach ($rows as $row) {
+        $runs[$row['script']] = $row;
+    }
+    return $runs;
+}
+
+/**
+ * Headline numbers for the dashboard, in one query. "Short intro" uses
+ * the same 200-character guide as the subjects list.
+ */
+function getDashboardCounts(): array
+{
+    $pdo = getDbConnection();
+    return $pdo->query(
+        "SELECT
+            (SELECT COUNT(*) FROM subjects WHERE status = 'published') AS published_subjects,
+            (SELECT COUNT(*) FROM subjects WHERE status = 'draft') AS draft_subjects,
+            (SELECT COUNT(*) FROM facts WHERE status = 'published') AS published_facts,
+            (SELECT COUNT(*) FROM facts WHERE status = 'draft') AS draft_facts,
+            (SELECT COUNT(DISTINCT source_id) FROM facts WHERE status = 'published') AS sources_used,
+            (SELECT COUNT(*) FROM subjects
+             WHERE status = 'published' AND CHAR_LENGTH(COALESCE(intro, '')) < 200) AS short_intros,
+            (SELECT COUNT(*) FROM subjects
+             WHERE status = 'published' AND COALESCE(explanation, '') = '') AS no_explanation"
+    )->fetch();
+}
+
+/**
+ * The most recent real value changes across the whole site, newest
+ * first, with how each was made (manual, import, pipeline).
+ */
+function getRecentFactChanges(int $limit = 10): array
+{
+    $pdo = getDbConnection();
+    return $pdo->query(
+        "SELECT fh.old_value, fh.old_value_numeric, fh.new_value, fh.new_value_numeric,
+                fh.change_source, fh.changed_at,
+                f.label, f.unit, f.value_type, f.primary_subject_id
+         FROM fact_history fh
+         JOIN facts f ON f.id = fh.fact_id
+         WHERE fh.old_value IS NOT NULL
+         ORDER BY fh.changed_at DESC, fh.id DESC
+         LIMIT " . (int) $limit
+    )->fetchAll();
 }
