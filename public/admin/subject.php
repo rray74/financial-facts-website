@@ -18,7 +18,15 @@ requireAdmin();
  */
 
 $subjectId = (int) ($_GET['id'] ?? 0);
-$subject = $subjectId > 0 ? getAdminSubject($subjectId) : null;
+
+// Opened without choosing a subject (e.g. /admin/subject.php typed in
+// directly), so go to the list to pick one rather than show a 404.
+if ($subjectId <= 0) {
+    header('Location: /admin/subjects.php');
+    exit;
+}
+
+$subject = getAdminSubject($subjectId);
 if (!$subject) {
     showErrorPage(404, 'Subject not found.');
 }
