@@ -10,7 +10,7 @@ requireAdmin();
 /*
  * Edit one subject page: its intro, search listing (meta title and
  * description) and status, plus the label, context and review cadence of
- * each fact the page owns.
+ * each fact the page owns, and add new facts to it.
  *
  * Fact VALUES aren't edited here. They change on the review page or via
  * the importer, through updateFactValue(), so every change is recorded
@@ -83,6 +83,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             setAdminFlash('success', 'Fact saved.');
 
+        } elseif ($action === 'add_fact') {
+            $returnAnchor = '#add-fact';
+
+            // New facts belong to this page. addFactToSubject() checks every
+            // field, then creates the fact through createFact(), the same
+            // path the importer uses, so its first value goes into
+            // fact_history and it's added to the end of this page.
+            $result = addFactToSubject($pdo, $subjectId, [
+                'fact_key'              => $_POST['fact_key'] ?? null,
+                'label'                 => $_POST['label'] ?? null,
+                'value'                 => $_POST['value'] ?? null,
+                'unit'                  => $_POST['unit'] ?? null,
+                'context'               => $_POST['context'] ?? null,
+                'jurisdiction_id'       => $_POST['jurisdiction_id'] ?? 0,
+                'source_url'            => $_POST['source_url'] ?? null,
+                'source_publisher'      => $_POST['source_publisher'] ?? null,
+                'effective_from'        => $_POST['effective_from'] ?? null,
+                'tax_year'              => $_POST['tax_year'] ?? null,
+                'review_frequency_days' => $_POST['review_frequency_days'] ?? null,
+                'status'                => $_POST['status'] ?? 'draft',
+            ]);
+
+            $returnAnchor = '#fact-' . $result['id'];
+            if ($result['note'] !== null) {
+                // Asked to publish, but the source isn't allowlisted (or is missing).
+                setAdminFlash('info', 'Fact added. ' . $result['note']);
+            } else {
+                setAdminFlash('success', $result['status'] === 'published'
+                    ? 'Fact added and published.'
+                    : 'Fact added as a draft. It won\'t show on the page until it\'s published.');
+            }
+
         } else {
             throw new RuntimeException('Unknown action.');
         }
@@ -100,6 +132,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $old = takeAdminInput();
 $oldSubject = ($old['action'] ?? '') === 'save_subject' ? $old : null;
 $oldFactId = ($old['action'] ?? '') === 'save_fact' ? (int) ($old['fact_id'] ?? 0) : 0;
+$addFactFailed = ($old['action'] ?? '') === 'add_fact';
+
+// The "Add a fact" form starts blank, with sensible defaults, unless a
+// previous attempt failed, in which case it shows what was typed.
+$newFact = $addFactFailed ? $old : [];
+$newFact += [
+    'fact_key' => '', 'label' => '', 'value' => '', 'unit' => '', 'context' => '',
+    'jurisdiction_id' => (int) $subject['country_id'], 'source_url' => '', 'source_publisher' => '',
+    'effective_from' => '', 'tax_year' => '', 'review_frequency_days' => 365, 'status' => 'published',
+];
+
+// The page's country and its nations, for "Applies to".
+$jurisdictionOptions = getJurisdictionOptions((int) $subject['country_id']);
 
 $form = [
     'intro'            => $oldSubject['intro'] ?? (string) $subject['intro'],
@@ -215,7 +260,7 @@ include __DIR__ . '/../../includes/admin-nav.php';
 <section id="facts" class="mb-14">
     <h2 class="font-display text-2xl font-semibold mb-2">Facts on this page</h2>
     <p class="opacity-80 max-w-xl mb-6 text-sm">
-        In page order. Facts this page owns can be edited here. Shared facts belong to another
+        In page order. Facts this page owns can be edited here, and new ones added at the bottom. Shared facts belong to another
         page and are edited there. Values change on the
         <a href="/admin/review.php" class="underline hover:text-accent">review page</a> or through the
         importer, so every change is recorded in the fact's history.
@@ -319,6 +364,162 @@ include __DIR__ . '/../../includes/admin-nav.php';
         <?php endforeach; ?>
     </div>
 </section>
+
+<?php // ---------- Add a fact (folded away unless a previous attempt failed) ---------- ?>
+<section class="mb-14">
+<details id="add-fact" class="fact-card p-5 scroll-mt-6" <?= $addFactFailed ? 'open' : '' ?>>
+    <summary class="font-semibold cursor-pointer">Add a fact to this page</summary>
+
+    <p class="text-sm opacity-80 mt-3 max-w-xl">
+        The new fact belongs to this page and goes to the end of it. Facts from an allowlisted
+        (official) source can publish straight away. Anything else is saved as a draft.
+    </p>
+
+    <form method="post" class="space-y-4 mt-4 max-w-2xl">
+        <?= adminCsrfField() ?>
+        <input type="hidden" name="action" value="add_fact">
+
+        <div>
+            <label for="nf-label" class="block text-sm font-semibold mb-1">Label</label>
+            <input type="text" id="nf-label" name="label" required maxlength="255"
+                class="input input-bordered input-sm w-full" value="<?= e((string) $newFact['label']) ?>"
+                placeholder="e.g. Junior ISA annual allowance">
+        </div>
+
+        <div>
+            <label for="nf-key" class="block text-sm font-semibold mb-1">Key</label>
+            <input type="text" id="nf-key" name="fact_key" required maxlength="100" pattern="[a-z0-9]+(_[a-z0-9]+)*"
+                class="input input-bordered input-sm w-full font-mono" value="<?= e((string) $newFact['fact_key']) ?>"
+                placeholder="junior_isa_allowance">
+            <p class="text-xs opacity-60 mt-1">
+                The fact's permanent id, used by the importer, worked examples and checks. Filled in from
+                the label. Must be unique, and can't be changed later.
+            </p>
+        </div>
+
+        <div class="flex flex-wrap gap-4">
+            <div>
+                <label for="nf-value" class="block text-sm font-semibold mb-1">Value</label>
+                <input type="text" id="nf-value" name="value" required
+                    class="input input-bordered input-sm w-40" value="<?= e((string) $newFact['value']) ?>"
+                    placeholder="9,000">
+            </div>
+            <div>
+                <label for="nf-unit" class="block text-sm font-semibold mb-1">Unit</label>
+                <?php // Suggestions only. Any short unit can be typed. ?>
+                <input type="text" id="nf-unit" name="unit" maxlength="20" list="unit-suggestions"
+                    class="input input-bordered input-sm w-28" value="<?= e((string) $newFact['unit']) ?>"
+                    placeholder="£">
+                <datalist id="unit-suggestions">
+                    <option value="£"><option value="%"><option value="years"><option value="weeks"><option value="days">
+                </datalist>
+            </div>
+            <div>
+                <label for="nf-jurisdiction" class="block text-sm font-semibold mb-1">Applies to</label>
+                <select id="nf-jurisdiction" name="jurisdiction_id" class="select select-bordered select-sm">
+                    <?php foreach ($jurisdictionOptions as $option): ?>
+                    <option value="<?= (int) $option['id'] ?>"
+                        <?= (int) $newFact['jurisdiction_id'] === (int) $option['id'] ? 'selected' : '' ?>>
+                        <?= e($option['name']) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        </div>
+        <p class="text-xs opacity-60 -mt-2">
+            Enter the number as the source shows it. The unit is added on display, so 9000 with £ shows as £9,000.
+        </p>
+
+        <div>
+            <label for="nf-context" class="block text-sm font-semibold mb-1">Context <span class="font-normal opacity-60">(optional)</span></label>
+            <input type="text" id="nf-context" name="context"
+                class="input input-bordered input-sm w-full" value="<?= e((string) $newFact['context']) ?>"
+                placeholder="One line under the figure, e.g. who it applies to">
+        </div>
+
+        <div class="flex flex-wrap gap-4">
+            <div class="flex-1 min-w-64">
+                <label for="nf-source" class="block text-sm font-semibold mb-1">Source page</label>
+                <input type="url" id="nf-source" name="source_url"
+                    class="input input-bordered input-sm w-full" value="<?= e((string) $newFact['source_url']) ?>"
+                    placeholder="https://www.gov.uk/...">
+            </div>
+            <div>
+                <label for="nf-publisher" class="block text-sm font-semibold mb-1">Publisher</label>
+                <input type="text" id="nf-publisher" name="source_publisher" maxlength="255"
+                    class="input input-bordered input-sm w-40" value="<?= e((string) $newFact['source_publisher']) ?>"
+                    placeholder="GOV.UK">
+            </div>
+        </div>
+        <p class="text-xs opacity-60 -mt-2">
+            Use the exact page the figure appears on, since the weekly check looks for it there. Publisher
+            is only used if this page hasn't been used as a source before.
+        </p>
+
+        <div class="flex flex-wrap gap-4 items-end">
+            <div>
+                <label for="nf-effective" class="block text-sm font-semibold mb-1">In effect from <span class="font-normal opacity-60">(optional)</span></label>
+                <?php // Future dates are refused: figures go live the moment they're saved. ?>
+                <input type="date" id="nf-effective" name="effective_from" max="<?= date('Y-m-d') ?>"
+                    class="input input-bordered input-sm" value="<?= e((string) $newFact['effective_from']) ?>">
+            </div>
+            <div>
+                <label for="nf-tax-year" class="block text-sm font-semibold mb-1">Tax year <span class="font-normal opacity-60">(optional)</span></label>
+                <input type="text" id="nf-tax-year" name="tax_year" pattern="\d{4}/\d{2}"
+                    class="input input-bordered input-sm w-28" value="<?= e((string) $newFact['tax_year']) ?>"
+                    placeholder="2026/27">
+            </div>
+            <div>
+                <label for="nf-review" class="block text-sm font-semibold mb-1">Review every</label>
+                <span class="flex items-center gap-2">
+                    <input type="number" id="nf-review" name="review_frequency_days" min="1" max="3650" step="1" required
+                        class="input input-bordered input-sm w-24" value="<?= e((string) $newFact['review_frequency_days']) ?>">
+                    <span class="text-sm opacity-70">days</span>
+                </span>
+            </div>
+        </div>
+
+        <fieldset>
+            <legend class="text-sm font-semibold mb-2">Status</legend>
+            <?php foreach (NEW_FACT_STATUSES as $status): ?>
+            <label class="inline-flex items-center gap-2 mr-6 cursor-pointer">
+                <input type="radio" name="status" value="<?= e($status) ?>" class="radio radio-sm"
+                    <?= $newFact['status'] === $status ? 'checked' : '' ?>>
+                <span class="font-mono text-sm"><?= e($status) ?></span>
+            </label>
+            <?php endforeach; ?>
+            <?php if ($subject['status'] !== 'published'): ?>
+            <?php // A published fact on a draft page still isn't public until the page is published. ?>
+            <p class="text-xs opacity-60 mt-2">This page is <?= e($subject['status']) ?>, so its facts aren't public yet either way.</p>
+            <?php endif; ?>
+        </fieldset>
+
+        <button type="submit" class="btn btn-sm btn-primary">Add fact</button>
+    </form>
+</details>
+</section>
+
+<script>
+    // Fill the key from the label as you type (e.g. "Junior ISA annual
+    // allowance" becomes junior_isa_annual_allowance), until the key is
+    // edited by hand.
+    (function () {
+        var label = document.getElementById('nf-label');
+        var key = document.getElementById('nf-key');
+        var edited = key.value !== '';
+
+        key.addEventListener('input', function () { edited = key.value !== ''; });
+        label.addEventListener('input', function () {
+            if (edited) return;
+            key.value = label.value.toLowerCase()
+                .replace(/£/g, '')
+                .replace(/&/g, ' and ')
+                .replace(/%/g, ' percent ')
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
+        });
+    })();
+</script>
 
 <script>
     // Live character counts under the intro and meta fields. Fields with a

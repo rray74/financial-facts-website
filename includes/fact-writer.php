@@ -608,3 +608,203 @@ function updateFactDetails(PDO $pdo, int $factId, array $fields): void
         'id'      => $factId,
     ]);
 }
+
+// ------------------------------------------------------------
+// Adding subjects and facts from the admin editor (Phase 1, step 2).
+//
+// These check everything typed into the forms, then hand over to the
+// same code the importer uses (createFact, getOrCreateSource), so a fact
+// added in the browser ends up exactly like an imported one, with its
+// first fact_history row and its page link.
+// ------------------------------------------------------------
+
+/** Statuses a fact can be given when it's added. Retiring comes later. */
+const NEW_FACT_STATUSES = ['draft', 'published'];
+
+/**
+ * Create a subject page. Returns the new subject's id.
+ *
+ * $s keys: subcategory_id, name, slug, intro (optional), status
+ * (default 'draft', so a new page stays hidden until it has facts and
+ * an intro worth showing).
+ */
+function createSubject(PDO $pdo, array $s): int
+{
+    $name = cleanEditorText($s['name'] ?? null, true);
+    $slug = strtolower((string) cleanEditorText($s['slug'] ?? null, true));
+    $intro = cleanEditorText($s['intro'] ?? null);
+    $status = (string) ($s['status'] ?? 'draft');
+    $subcategoryId = (int) ($s['subcategory_id'] ?? 0);
+
+    if ($name === null) {
+        throw new RuntimeException('Give the subject a name.');
+    }
+    if (textLength($name) > 255) {
+        throw new RuntimeException('Name is too long (255 characters at most).');
+    }
+    // Slugs become the last part of the page address, so only lowercase
+    // letters, numbers and single hyphens, e.g. 2-year-fixed-mortgage-rates.
+    if (!preg_match('/^[a-z0-9]+(-[a-z0-9]+)*$/', $slug) || strlen($slug) > 120) {
+        throw new RuntimeException('The address (slug) can only use lowercase letters, numbers and hyphens, e.g. junior-isa-allowance.');
+    }
+    if (!in_array($status, SUBJECT_STATUSES, true)) {
+        throw new RuntimeException('Choose a status: draft, published or retired.');
+    }
+
+    $stmt = $pdo->prepare('SELECT id FROM subcategories WHERE id = :id');
+    $stmt->execute(['id' => $subcategoryId]);
+    if (!$stmt->fetchColumn()) {
+        throw new RuntimeException('Choose where the page goes (category and subcategory).');
+    }
+
+    // Subject slugs are unique across the whole site (fact.php finds a
+    // page by its slug alone), so check before inserting to give a clear
+    // message rather than a database error.
+    $stmt = $pdo->prepare('SELECT name FROM subjects WHERE slug = :slug');
+    $stmt->execute(['slug' => $slug]);
+    $existing = $stmt->fetchColumn();
+    if ($existing !== false) {
+        throw new RuntimeException("The address '$slug' is already used by \"$existing\". Choose another.");
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO subjects (subcategory_id, name, slug, intro, status)
+         VALUES (:subcategory_id, :name, :slug, :intro, :status)'
+    );
+    $stmt->execute([
+        'subcategory_id' => $subcategoryId,
+        'name'           => $name,
+        'slug'           => $slug,
+        'intro'          => $intro,
+        'status'         => $status,
+    ]);
+
+    return (int) $pdo->lastInsertId();
+}
+
+/**
+ * Add a new fact, owned by $subjectId, from the editor's "Add a fact"
+ * form. Returns ['id' => new fact id, 'status' => status it was saved
+ * with, 'note' => why the status differs from the one asked for, or
+ * NULL].
+ *
+ * $in keys: fact_key, label, value, unit, context, jurisdiction_id,
+ * source_url, source_publisher, effective_from, tax_year,
+ * review_frequency_days, status.
+ *
+ * A fact can only be published straight away if its source is on the
+ * allowlist (official sources). Anything else is saved as a draft, the
+ * same rule the automated pipeline will follow.
+ */
+function addFactToSubject(PDO $pdo, int $subjectId, array $in): array
+{
+    $factKey = strtolower((string) cleanEditorText($in['fact_key'] ?? null, true));
+    $label = cleanEditorText($in['label'] ?? null, true);
+    $value = cleanEditorText($in['value'] ?? null, true);
+    $unit = cleanEditorText($in['unit'] ?? null, true);
+    $context = cleanEditorText($in['context'] ?? null, true);
+    $sourceUrl = cleanEditorText($in['source_url'] ?? null, true);
+    $publisher = cleanEditorText($in['source_publisher'] ?? null, true);
+    $effectiveFrom = cleanEditorText($in['effective_from'] ?? null, true);
+    $taxYear = cleanEditorText($in['tax_year'] ?? null, true);
+    $jurisdictionId = (int) ($in['jurisdiction_id'] ?? 0);
+    $reviewDays = filter_var($in['review_frequency_days'] ?? null, FILTER_VALIDATE_INT);
+    $status = (string) ($in['status'] ?? 'draft');
+
+    // --- Check each field, with a message saying what to fix. ---
+
+    // Keys are what {{fact:key}} placeholders and worked examples use, so
+    // they follow the same pattern as those (letters, numbers, _).
+    if (!preg_match('/^[a-z0-9]+(_[a-z0-9]+)*$/', $factKey) || strlen($factKey) > 100) {
+        throw new RuntimeException('The key can only use lowercase letters, numbers and underscores, e.g. junior_isa_allowance.');
+    }
+    if ($label === null) {
+        throw new RuntimeException('A fact needs a label.');
+    }
+    if (textLength($label) > 255) {
+        throw new RuntimeException('Label is too long (255 characters at most).');
+    }
+    if ($value === null) {
+        throw new RuntimeException('Enter the value.');
+    }
+    if ($unit !== null && textLength($unit) > 20) {
+        throw new RuntimeException('Unit is too long. Use a short unit such as £, %, years or weeks.');
+    }
+    if ($effectiveFrom !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $effectiveFrom)) {
+        throw new RuntimeException('Effective date must be a valid date.');
+    }
+    // Same format as the importer and the "tax year ended" check use.
+    if ($taxYear !== null && !preg_match('/^\d{4}\/\d{2}$/', $taxYear)) {
+        throw new RuntimeException('Tax year must look like 2026/27.');
+    }
+    if ($reviewDays === false || $reviewDays < 1 || $reviewDays > 3650) {
+        throw new RuntimeException('Review every must be a whole number of days, from 1 to 3650.');
+    }
+    if (!in_array($status, NEW_FACT_STATUSES, true)) {
+        throw new RuntimeException('Choose a status: draft or published.');
+    }
+    if ($sourceUrl !== null) {
+        $scheme = strtolower((string) parse_url($sourceUrl, PHP_URL_SCHEME));
+        if (!filter_var($sourceUrl, FILTER_VALIDATE_URL) || !in_array($scheme, ['http', 'https'], true)) {
+            throw new RuntimeException('Source must be a full web address, starting https://');
+        }
+    }
+
+    // The key must be new. Facts are found by key across the whole site.
+    $stmt = $pdo->prepare('SELECT label FROM facts WHERE fact_key = :key');
+    $stmt->execute(['key' => $factKey]);
+    $existing = $stmt->fetchColumn();
+    if ($existing !== false) {
+        throw new RuntimeException("The key '$factKey' is already used by \"$existing\". Choose another.");
+    }
+
+    // The fact's jurisdiction must be the page's country or one of its
+    // nations/regions, so a UK page can't get (say) a US figure by mistake.
+    $stmt = $pdo->prepare(
+        'SELECT j.id
+         FROM subjects s
+         JOIN subcategories sc ON sc.id = s.subcategory_id
+         JOIN categories c ON c.id = sc.category_id
+         JOIN jurisdictions j ON j.id = c.jurisdiction_id OR j.parent_id = c.jurisdiction_id
+         WHERE s.id = :sid AND j.id = :jid'
+    );
+    $stmt->execute(['sid' => $subjectId, 'jid' => $jurisdictionId]);
+    if (!$stmt->fetchColumn()) {
+        throw new RuntimeException('Choose where the figure applies (the UK, or one of its nations).');
+    }
+
+    // --- Decide the status: only allowlisted sources publish directly. ---
+    $note = null;
+    if ($status === 'published' && ($sourceUrl === null || getAllowlistEntry($sourceUrl) === null)) {
+        $status = 'draft';
+        $note = $sourceUrl === null
+            ? 'Saved as a draft: a fact needs a source before it can be published.'
+            : 'Saved as a draft: ' . parse_url($sourceUrl, PHP_URL_HOST) . ' isn\'t on the source allowlist, so it can\'t publish directly.';
+    }
+
+    // --- Write, in one transaction: the source (if new) and the fact. ---
+    $factId = withTransaction($pdo, function () use (
+        $pdo, $subjectId, $factKey, $label, $value, $unit, $context, $sourceUrl, $publisher,
+        $effectiveFrom, $taxYear, $jurisdictionId, $reviewDays, $status
+    ) {
+        $sourceId = $sourceUrl !== null ? getOrCreateSource($pdo, $sourceUrl, $publisher, $jurisdictionId) : null;
+
+        return createFact($pdo, [
+            'primary_subject_id'    => $subjectId,
+            'jurisdiction_id'       => $jurisdictionId,
+            'fact_key'              => $factKey,
+            'label'                 => $label,
+            'value'                 => $value,
+            'unit'                  => $unit,
+            'context'               => $context,
+            'source_id'             => $sourceId,
+            'effective_from'        => $effectiveFrom,
+            'tax_year'              => $taxYear,
+            'review_frequency_days' => $reviewDays,
+            'status'                => $status,
+            'change_source'         => 'manual',
+        ]);
+    });
+
+    return ['id' => $factId, 'status' => $status, 'note' => $note];
+}

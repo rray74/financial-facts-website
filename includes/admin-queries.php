@@ -45,7 +45,7 @@ function getAdminSubject(int $subjectId): ?array
     $stmt = $pdo->prepare(
         'SELECT s.*, sc.name AS subcategory_name, sc.slug AS subcategory_slug,
                 c.name AS category_name, c.slug AS category_slug,
-                j.url_prefix AS country_prefix, j.name AS country_name
+                j.id AS country_id, j.url_prefix AS country_prefix, j.name AS country_name
          FROM subjects s
          JOIN subcategories sc ON sc.id = s.subcategory_id
          JOIN categories c ON c.id = sc.category_id
@@ -91,5 +91,38 @@ function getAdminFactsForSubject(int $subjectId): array
          ORDER BY sf.sort_order ASC, f.label ASC'
     );
     $stmt->execute(['sid' => $subjectId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Every subcategory, with its category and country, for the "where does
+ * this page go" choice when adding a subject. Ordered like the site.
+ */
+function getAdminSubcategoryOptions(): array
+{
+    $pdo = getDbConnection();
+    return $pdo->query(
+        'SELECT sc.id, sc.name, c.name AS category_name, j.name AS country_name
+         FROM subcategories sc
+         JOIN categories c ON c.id = sc.category_id
+         JOIN jurisdictions j ON j.id = c.jurisdiction_id
+         ORDER BY j.id, c.name, sc.name'
+    )->fetchAll();
+}
+
+/**
+ * A country and its nations/regions (e.g. United Kingdom, then Scotland,
+ * Wales...), for the "applies to" choice when adding a fact. The country
+ * itself comes first, since most figures are country-wide.
+ */
+function getJurisdictionOptions(int $countryId): array
+{
+    $pdo = getDbConnection();
+    $stmt = $pdo->prepare(
+        'SELECT id, name, parent_id FROM jurisdictions
+         WHERE id = :cid OR parent_id = :cid2
+         ORDER BY parent_id IS NOT NULL, name'
+    );
+    $stmt->execute(['cid' => $countryId, 'cid2' => $countryId]);
     return $stmt->fetchAll();
 }

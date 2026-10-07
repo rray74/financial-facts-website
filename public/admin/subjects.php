@@ -9,9 +9,48 @@ requireAdmin();
 
 /*
  * Every subject page, whatever its status, grouped the way the site's
- * navigation is. Each row links to the editor (subject.php). Read-only:
- * this page has no forms.
+ * navigation is. Each row links to the editor (subject.php).
+ *
+ * Also has the "Add a subject" form. A new subject is created as a draft
+ * (hidden from the public), and you're taken straight to its editor to
+ * add facts.
  */
+
+// ------------------------------------------------------------
+// Action: add a subject, through createSubject() in fact-writer.php.
+// Redirects afterwards (Post/Redirect/Get) so refreshing can't resubmit.
+// ------------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        requireValidCsrf();
+        if (($_POST['action'] ?? '') !== 'add_subject') {
+            throw new RuntimeException('Unknown action.');
+        }
+
+        $newId = createSubject(getDbConnection(), [
+            'subcategory_id' => $_POST['subcategory_id'] ?? 0,
+            'name'           => $_POST['name'] ?? null,
+            'slug'           => $_POST['slug'] ?? null,
+            'intro'          => $_POST['intro'] ?? null,
+            'status'         => 'draft',
+        ]);
+
+        setAdminFlash('success', 'Subject added as a draft. Add its facts, then publish it when it\'s ready.');
+        header('Location: /admin/subject.php?id=' . $newId);
+        exit;
+    } catch (Throwable $e) {
+        // Keep what was typed and reopen the form, so nothing is lost.
+        rememberAdminInput($_POST);
+        setAdminFlash('error', $e->getMessage());
+        header('Location: /admin/subjects.php#add-subject');
+        exit;
+    }
+}
+
+// Input from an add that failed, put back into the form below.
+$old = takeAdminInput();
+$addFailed = ($old['action'] ?? '') === 'add_subject';
+$subcategoryOptions = getAdminSubcategoryOptions();
 
 $subjects = getAdminSubjectList();
 
@@ -43,9 +82,86 @@ include __DIR__ . '/../../includes/admin-nav.php';
         <?= (int) ($statusCounts['published'] ?? 0) ?> published,
         <?= (int) ($statusCounts['draft'] ?? 0) ?> draft,
         <?= (int) ($statusCounts['retired'] ?? 0) ?> retired.
-        Choose one to edit its intro, search listing, status and facts.
+        Choose one to edit its intro, search listing, status and facts, or add a new one.
     </p>
 </section>
+
+<?php // ---------- Add a subject (folded away unless a previous attempt failed) ---------- ?>
+<details id="add-subject" class="fact-card p-5 mb-10 scroll-mt-6" <?= $addFailed ? 'open' : '' ?>>
+    <summary class="font-semibold cursor-pointer">Add a subject</summary>
+
+    <form method="post" class="space-y-4 mt-4 max-w-2xl">
+        <?= adminCsrfField() ?>
+        <input type="hidden" name="action" value="add_subject">
+
+        <div>
+            <label for="new-subcategory" class="block text-sm font-semibold mb-1">Goes in</label>
+            <select id="new-subcategory" name="subcategory_id" required class="select select-bordered select-sm w-full">
+                <option value="">Choose a category and subcategory</option>
+                <?php // One group per "Country: Category", so the list reads like the site's navigation. ?>
+                <?php $currentGroup = null; ?>
+                <?php foreach ($subcategoryOptions as $option): ?>
+                <?php $group = $option['country_name'] . ': ' . $option['category_name']; ?>
+                <?php if ($group !== $currentGroup): ?>
+                <?php if ($currentGroup !== null): ?></optgroup><?php endif; ?>
+                <optgroup label="<?= e($group) ?>">
+                <?php $currentGroup = $group; ?>
+                <?php endif; ?>
+                    <option value="<?= (int) $option['id'] ?>"
+                        <?= $addFailed && (int) ($old['subcategory_id'] ?? 0) === (int) $option['id'] ? 'selected' : '' ?>>
+                        <?= e($option['name']) ?>
+                    </option>
+                <?php endforeach; ?>
+                <?php if ($currentGroup !== null): ?></optgroup><?php endif; ?>
+            </select>
+            <p class="text-xs opacity-60 mt-1">New categories and subcategories are still added through the importer.</p>
+        </div>
+
+        <div>
+            <label for="new-name" class="block text-sm font-semibold mb-1">Name</label>
+            <input type="text" id="new-name" name="name" required maxlength="255"
+                class="input input-bordered input-sm w-full" value="<?= e($addFailed ? (string) ($old['name'] ?? '') : '') ?>"
+                placeholder="e.g. Junior ISA Allowance">
+        </div>
+
+        <div>
+            <label for="new-slug" class="block text-sm font-semibold mb-1">Address (slug)</label>
+            <input type="text" id="new-slug" name="slug" required maxlength="120" pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                class="input input-bordered input-sm w-full font-mono" value="<?= e($addFailed ? (string) ($old['slug'] ?? '') : '') ?>"
+                placeholder="junior-isa-allowance">
+            <p class="text-xs opacity-60 mt-1">
+                The last part of the page address. Filled in from the name, and best not changed once the
+                page is published, since it changes the URL.
+            </p>
+        </div>
+
+        <div>
+            <label for="new-intro" class="block text-sm font-semibold mb-1">Intro <span class="font-normal opacity-60">(optional, can be added later)</span></label>
+            <textarea id="new-intro" name="intro" rows="3" class="textarea textarea-bordered w-full"><?= e($addFailed ? (string) ($old['intro'] ?? '') : '') ?></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-sm btn-primary">Add as draft</button>
+    </form>
+</details>
+
+<script>
+    // Fill the slug from the name as you type (e.g. "Junior ISA Allowance"
+    // becomes junior-isa-allowance), until the slug is edited by hand.
+    (function () {
+        var name = document.getElementById('new-name');
+        var slug = document.getElementById('new-slug');
+        var edited = slug.value !== '';
+
+        slug.addEventListener('input', function () { edited = slug.value !== ''; });
+        name.addEventListener('input', function () {
+            if (edited) return;
+            slug.value = name.value.toLowerCase()
+                .replace(/&/g, ' and ')
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+        });
+    })();
+</script>
 
 <?php if (empty($subjects)): ?>
 <p class="fact-card p-6 text-secondary">No subjects yet.</p>
