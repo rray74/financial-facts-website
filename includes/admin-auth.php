@@ -129,3 +129,83 @@ function safeAdminRedirect(?string $next): string
     }
     return '/admin/review.php';
 }
+
+// ------------------------------------------------------------
+// Shared helpers for admin forms (added for the Phase 1 editor).
+//
+// review.php has its own copy of the CSRF and flash code. These use the
+// same session keys ('csrf_token' and 'flash'), so both work side by
+// side, and review.php can switch over to these later.
+// ------------------------------------------------------------
+
+/**
+ * The session's CSRF token, created on first use. Every admin form sends
+ * it back, so another site can't submit a form on your behalf while
+ * you're logged in.
+ */
+function adminCsrfToken(): string
+{
+    startAdminSession();
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/** The hidden field to put inside every admin <form method="post">. */
+function adminCsrfField(): string
+{
+    return '<input type="hidden" name="csrf_token" value="' . e(adminCsrfToken()) . '">';
+}
+
+/**
+ * Call at the start of handling any POST. Throws if the token is missing
+ * or wrong (usually a form left open from a previous login).
+ */
+function requireValidCsrf(): void
+{
+    if (!hash_equals(adminCsrfToken(), (string) ($_POST['csrf_token'] ?? ''))) {
+        throw new RuntimeException('Form expired. Please try again.');
+    }
+}
+
+/**
+ * A one-off message shown on the next page load, after the redirect that
+ * follows every form (Post/Redirect/Get). $type is 'success', 'info' or
+ * 'error', matching the DaisyUI alert colours.
+ */
+function setAdminFlash(string $type, string $text): void
+{
+    startAdminSession();
+    $_SESSION['flash'] = ['type' => $type, 'text' => $text];
+}
+
+/** Returns the waiting message, if any, and clears it so it shows once. */
+function takeAdminFlash(): ?array
+{
+    startAdminSession();
+    $flash = $_SESSION['flash'] ?? null;
+    unset($_SESSION['flash']);
+    return $flash;
+}
+
+/**
+ * Keep what was typed into a form that failed to save, so the page can
+ * put it back instead of losing (for example) a long intro you'd just
+ * written. The CSRF token isn't kept.
+ */
+function rememberAdminInput(array $input): void
+{
+    startAdminSession();
+    unset($input['csrf_token']);
+    $_SESSION['admin_old_input'] = $input;
+}
+
+/** Returns the kept input (or an empty array) and clears it. */
+function takeAdminInput(): array
+{
+    startAdminSession();
+    $input = $_SESSION['admin_old_input'] ?? [];
+    unset($_SESSION['admin_old_input']);
+    return is_array($input) ? $input : [];
+}

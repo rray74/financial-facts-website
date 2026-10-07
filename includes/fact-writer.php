@@ -7,6 +7,10 @@
  * page-link rules live in one place. Used by scripts/import-facts.php and
  * public/admin/review.php now, and by the cron pipeline later.
  *
+ * The admin editor's other writes live here too (updateSubjectDetails,
+ * updateFactDetails, at the end of the file), so every content change
+ * has one home, whichever page or script makes it.
+ *
  * The public site never includes this file. It only reads, through
  * includes/functions.php.
  */
@@ -474,4 +478,133 @@ function recordPreviousValue(PDO $pdo, int $factId, string $previousValue, ?stri
     ]);
 
     return true;
+}
+
+// ------------------------------------------------------------
+// Admin editor writes (Phase 1).
+//
+// These change wording and settings, not values, so they don't write
+// fact_history: "What's changed" on the public pages is about figures,
+// and a reworded label isn't a change in the figure.
+// ------------------------------------------------------------
+
+/** The statuses a subject can have (see fact.php for what each means publicly). */
+const SUBJECT_STATUSES = ['draft', 'published', 'retired'];
+
+/**
+ * Tidy text typed into an admin form. Trims it, turns Windows line
+ * endings into plain ones, and returns NULL for an empty field, so
+ * "nothing entered" is always stored the same way (the public pages
+ * treat NULL as "not set" and fall back, e.g. meta title to name).
+ *
+ * $singleLine collapses all runs of whitespace, including line breaks,
+ * to one space: right for titles, labels and meta descriptions.
+ */
+function cleanEditorText(?string $text, bool $singleLine = false): ?string
+{
+    $text = str_replace(["\r\n", "\r"], "\n", (string) $text);
+    if ($singleLine) {
+        $text = preg_replace('/\s+/u', ' ', $text);
+    }
+    $text = trim($text);
+    return $text === '' ? null : $text;
+}
+
+/**
+ * Length in characters rather than bytes, so £ counts as one. Uses a
+ * regex instead of mb_strlen so it doesn't depend on mbstring (same
+ * approach as the meta description trim in header.php).
+ */
+function textLength(?string $text): int
+{
+    return $text === null ? 0 : (int) preg_match_all('/./su', $text);
+}
+
+/**
+ * Save a subject's editable fields from the admin editor: intro, meta
+ * title, meta description and status. Name and slug aren't editable
+ * here, because changing a slug changes the page's address.
+ *
+ * $fields keys: intro, meta_title, meta_description, status.
+ */
+function updateSubjectDetails(PDO $pdo, int $subjectId, array $fields): void
+{
+    $intro = cleanEditorText($fields['intro'] ?? null);
+    $metaTitle = cleanEditorText($fields['meta_title'] ?? null, true);
+    $metaDescription = cleanEditorText($fields['meta_description'] ?? null, true);
+    $status = (string) ($fields['status'] ?? '');
+
+    if (!in_array($status, SUBJECT_STATUSES, true)) {
+        throw new RuntimeException('Choose a status: draft, published or retired.');
+    }
+    // 255 is a hard stop to fit the database column. The editor's
+    // counters show the much shorter lengths search results actually use.
+    if (textLength($metaTitle) > 255) {
+        throw new RuntimeException('Meta title is too long (255 characters at most).');
+    }
+    if (textLength($metaDescription) > 255) {
+        throw new RuntimeException('Meta description is too long (255 characters at most).');
+    }
+
+    $stmt = $pdo->prepare('SELECT id FROM subjects WHERE id = :id');
+    $stmt->execute(['id' => $subjectId]);
+    if (!$stmt->fetchColumn()) {
+        throw new RuntimeException("Subject $subjectId not found");
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE subjects
+         SET intro = :intro, meta_title = :meta_title, meta_description = :meta_description, status = :status
+         WHERE id = :id'
+    );
+    $stmt->execute([
+        'intro'            => $intro,
+        'meta_title'       => $metaTitle,
+        'meta_description' => $metaDescription,
+        'status'           => $status,
+        'id'               => $subjectId,
+    ]);
+}
+
+/**
+ * Save a fact's wording and review cadence from the admin editor: label,
+ * context and review_frequency_days. The value itself is never changed
+ * here. That always goes through updateFactValue(), so it's recorded in
+ * fact_history.
+ *
+ * $fields keys: label, context, review_frequency_days.
+ */
+function updateFactDetails(PDO $pdo, int $factId, array $fields): void
+{
+    $label = cleanEditorText($fields['label'] ?? null, true);
+    $context = cleanEditorText($fields['context'] ?? null, true);
+    $reviewDays = filter_var($fields['review_frequency_days'] ?? null, FILTER_VALIDATE_INT);
+
+    if ($label === null) {
+        throw new RuntimeException('A fact needs a label.');
+    }
+    if (textLength($label) > 255) {
+        throw new RuntimeException('Label is too long (255 characters at most).');
+    }
+    // Between a day and ten years. Annual figures usually use 365, and
+    // rates that can move any month 30.
+    if ($reviewDays === false || $reviewDays < 1 || $reviewDays > 3650) {
+        throw new RuntimeException('Review every must be a whole number of days, from 1 to 3650.');
+    }
+
+    $stmt = $pdo->prepare('SELECT id FROM facts WHERE id = :id');
+    $stmt->execute(['id' => $factId]);
+    if (!$stmt->fetchColumn()) {
+        throw new RuntimeException("Fact $factId not found");
+    }
+
+    $stmt = $pdo->prepare(
+        'UPDATE facts SET label = :label, context = :context, review_frequency_days = :review WHERE id = :id'
+    );
+    $stmt->execute([
+        'label'   => $label,
+        'context' => $context,
+        'review'  => $reviewDays,
+        'id'      => $factId,
+    ]);
 }
