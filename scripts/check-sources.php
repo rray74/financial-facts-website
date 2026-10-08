@@ -7,6 +7,7 @@
  * Usage, from the project root:
  *   php scripts/check-sources.php --dry-run   report only, write nothing
  *   php scripts/check-sources.php             check and record results
+ *   php scripts/check-sources.php --no-ai     skip the AI step (below)
  *
  * For each allowlisted source page it:
  *   1. downloads the page and reduces it to plain text,
@@ -15,10 +16,20 @@
  *   3. marks figures it finds as verified (fact_checks: unchanged), and
  *      records figures it can't find as not_found.
  *
- * It never changes a figure. A figure missing from its page usually means
- * the page now shows a new value (after a Budget, or a new tax year), and
- * it appears under "Needs a look" on /admin/review.php so you can check
- * and update it.
+ * A figure missing from its page usually means the page now shows a new
+ * value (after a Budget, or a new tax year). It appears under "Needs a
+ * look" on /admin/review.php, and then (Phase 2):
+ *
+ *   4. if ANTHROPIC_API_KEY is set, the missing figures for each page are
+ *      sent to Claude with the page text, and it proposes what the page
+ *      now says, quoting the passage. includes/ai-proposer.php gates each
+ *      proposal (quote really on the page, change not too large, already
+ *      in effect) and either holds it under "Held for review" or, if
+ *      AI_AUTO_APPLY is on and every gate passed, publishes it.
+ *
+ * With --dry-run the AI is still asked, so you can see its proposals,
+ * but nothing is written. This script itself never changes a figure;
+ * only the gated AI step can, and only with AI_AUTO_APPLY on.
  *
  * Figures for a tax year that has ended (e.g. 2026/27 after 5 April 2027)
  * are flagged too, even if their page still shows them, because pages for
@@ -41,6 +52,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/fact-writer.php';
+require_once __DIR__ . '/../includes/ai-proposer.php';
 
 /** Sources handled by another job. */
 const SKIP_SOURCE_URLS = ['https://www.bankofengland.co.uk/boeapps/database/'];
@@ -48,8 +60,11 @@ const SKIP_SOURCE_URLS = ['https://www.bankofengland.co.uk/boeapps/database/'];
 /** Pause between page downloads, to be polite to the sites we read. */
 const SECONDS_BETWEEN_REQUESTS = 1;
 
-$options = getopt('', ['dry-run']);
+$options = getopt('', ['dry-run', 'no-ai']);
 $dryRun = isset($options['dry-run']);
+
+// The AI step runs when a key is configured, unless --no-ai is given.
+$useAi = !isset($options['no-ai']) && aiProposalsAvailable();
 
 $pdo = getDbConnection();
 
@@ -59,7 +74,9 @@ if (!$dryRun) {
     $runId = (int) $pdo->lastInsertId();
 }
 
-$counts = ['found' => 0, 'not_found' => 0, 'tax_year_ended' => 0, 'skipped' => 0, 'source_errors' => 0];
+$counts = ['found' => 0, 'not_found' => 0, 'tax_year_ended' => 0, 'skipped' => 0, 'source_errors' => 0,
+           // What the AI step did with the not-found figures.
+           'ai_applied' => 0, 'ai_held' => 0, 'ai_verified' => 0, 'ai_errors' => 0];
 
 try {
     // Allowlisted sources that at least one published fact cites.
@@ -71,7 +88,10 @@ try {
          ORDER BY src.id"
     )->fetchAll();
 
-    echo $dryRun ? "DRY RUN: nothing will be written.\n\n" : '';
+    echo $dryRun ? "DRY RUN: nothing will be written.\n" : '';
+    echo $useAi
+        ? 'AI step on (' . ANTHROPIC_MODEL . ', ' . (AI_AUTO_APPLY ? 'publishes proposals that pass every check' : 'trial mode: holds every proposal') . ").\n\n"
+        : "AI step off.\n\n";
 
     foreach ($sources as $i => $source) {
         if (in_array($source['url'], SKIP_SOURCE_URLS, true)) {
@@ -110,6 +130,9 @@ try {
             )->execute(['h' => hash('sha256', $text), 'id' => $source['id']]);
         }
 
+        // Figures not found on this page, for the AI step after the loop.
+        $missing = [];
+
         foreach ($facts as $fact) {
             // A figure for a tax year that has finished needs replacing,
             // even if its source page still shows it (pages for a specific
@@ -147,9 +170,36 @@ try {
             } else {
                 echo "  ✗  {$fact['fact_key']}: " . implode(' / ', $candidates) . " NOT FOUND on the page\n";
                 $counts['not_found']++;
+                $missing[] = $fact;
                 if (!$dryRun) {
                     recordCheck($pdo, $fact, 'not_found', null);
                 }
+            }
+        }
+
+        // --- AI step: ask what the page now says for the missing figures. ---
+        // One request per page, covering all its missing figures. Figures
+        // past their tax year aren't sent: their page is often for that
+        // year only, so the new figure is usually on a different page.
+        if ($useAi && $missing) {
+            try {
+                $aiResults = proposeUpdatesFromPage($pdo, $source, $text, $missing, $dryRun);
+                foreach ($missing as $fact) {
+                    $result = $aiResults[$fact['id']] ?? ['outcome' => 'skipped', 'message' => 'no result'];
+                    echo "     AI  {$fact['fact_key']}: {$result['message']}\n";
+                    if ($result['outcome'] === 'applied') {
+                        $counts['ai_applied']++;
+                    } elseif ($result['outcome'] === 'held') {
+                        $counts['ai_held']++;
+                    } elseif ($result['outcome'] === 'verified') {
+                        $counts['ai_verified']++;
+                    }
+                }
+            } catch (Throwable $e) {
+                // An AI failure never stops the check. The figures simply
+                // stay under "Needs a look", as they would without AI.
+                echo '     AI  ERROR: ' . $e->getMessage() . "\n";
+                $counts['ai_errors']++;
             }
         }
         echo "\n";
@@ -158,6 +208,14 @@ try {
     $summary = "{$counts['found']} found, {$counts['not_found']} not found, "
         . "{$counts['tax_year_ended']} past their tax year, "
         . "{$counts['skipped']} not checkable, {$counts['source_errors']} sources unavailable";
+    if ($useAi) {
+        $summary .= ". AI: {$counts['ai_applied']} published, {$counts['ai_held']} held, "
+            . "{$counts['ai_verified']} confirmed unchanged, {$counts['ai_errors']} pages failed";
+    }
+
+    // Figures the AI published or confirmed no longer need a look.
+    $stillNeedALook = $counts['not_found'] - $counts['ai_applied'] - $counts['ai_verified']
+        + $counts['tax_year_ended'] + $counts['source_errors'];
     echo "Done. $summary.\n";
 
     if ($runId) {
@@ -165,16 +223,16 @@ try {
             "UPDATE cron_runs SET status = :status, jobs_processed = :done, jobs_failed = :failed,
              error = :note, finished_at = NOW() WHERE id = :id"
         )->execute([
-            'status' => $counts['source_errors'] > 0 ? 'error' : 'ok',
-            'done'   => $counts['found'],
-            'failed' => $counts['not_found'] + $counts['tax_year_ended'] + $counts['source_errors'],
+            'status' => $counts['source_errors'] + $counts['ai_errors'] > 0 ? 'error' : 'ok',
+            'done'   => $counts['found'] + $counts['ai_applied'] + $counts['ai_verified'],
+            'failed' => $stillNeedALook,
             'note'   => $summary,
             'id'     => $runId,
         ]);
     }
 
     // Non-zero exit when something needs a look, so the cron job reports it.
-    exit($counts['not_found'] + $counts['tax_year_ended'] + $counts['source_errors'] > 0 ? 1 : 0);
+    exit($stillNeedALook > 0 ? 1 : 0);
 
 } catch (Throwable $e) {
     fwrite(STDERR, 'FAILED: ' . $e->getMessage() . "\n");

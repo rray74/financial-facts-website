@@ -49,11 +49,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Publish through updateFactValue(), so it's recorded in the
                 // fact's history and linked back to this proposal.
                 withTransaction($pdo, function () use ($pdo, $change) {
+                    // The proposal's effective date and tax year go with it
+                    // (AI proposals read them from the source page). A date
+                    // still in the future is refused by updateFactValue(),
+                    // with a message saying to approve it once it's in effect.
                     updateFactValue($pdo, (int) $change['fact_id'], $change['proposed_value'], [
                         'change_source'  => 'pipeline',
                         'fact_change_id' => (int) $change['id'],
+                        'effective_from' => $change['effective_from'],
+                        'tax_year'       => $change['tax_year'],
                         'note'           => 'Approved on the review page',
                     ]);
+                    // Approved means checked against the source, so the
+                    // figure also leaves "Needs a look".
+                    markFactVerified($pdo, (int) $change['fact_id']);
                     $pdo->prepare(
                         "UPDATE fact_changes SET status = 'applied', decided_at = NOW(), applied_at = NOW() WHERE id = :id"
                     )->execute(['id' => $change['id']]);
