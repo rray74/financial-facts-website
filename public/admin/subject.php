@@ -3,6 +3,7 @@ require_once __DIR__ . '/../../includes/functions.php';
 require_once __DIR__ . '/../../includes/fact-writer.php';
 require_once __DIR__ . '/../../includes/admin-auth.php';
 require_once __DIR__ . '/../../includes/admin-queries.php';
+require_once __DIR__ . '/../../includes/ai-drafts.php'; // "Draft this for me" for the explanation
 
 // Must be first: sends anyone not logged in to /admin/login.php.
 requireAdmin();
@@ -11,6 +12,10 @@ requireAdmin();
  * Edit one subject page: its intro, explanation, search listing (meta
  * title and description) and status, plus the label, context and review cadence of
  * each fact the page owns, and add new facts to it.
+ *
+ * "Draft this for me" (Phase 2) asks the AI for a first draft of the
+ * explanation and puts it in the Explanation box, unsaved, for you to
+ * rewrite before clicking Save page details.
  *
  * Fact VALUES aren't edited here. They change on the review page or via
  * the importer, through updateFactValue(), so every change is recorded
@@ -56,7 +61,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         requireValidCsrf();
         $pdo = getDbConnection();
 
-        if ($action === 'save_subject') {
+        if ($action === 'save_subject' && !empty($_POST['draft_explanation'])) {
+            // "Draft this for me": the button is inside the page details
+            // form, so everything typed in the form comes back too. The
+            // draft replaces only the Explanation box, and NOTHING is saved:
+            // the form simply reappears with the draft in it.
+            $returnAnchor = '#explanation-field';
+
+            // The AI can take up to a minute; allow for that.
+            set_time_limit(150);
+
+            $draft = draftSubjectExplanation($subject, $facts);
+            // The draft replaces the Explanation box; draft_unmatched is
+            // shown in a note above it (see the form below).
+            rememberAdminInput([
+                'explanation'     => $draft['text'],
+                'draft_unmatched' => implode(', ', $draft['unmatched']),
+            ] + $_POST);
+
+            // The details (and any numbers to check) are in the note shown
+            // above the Explanation box, right next to the draft.
+            setAdminFlash('info', 'AI draft added to the Explanation box below. It is not saved yet.');
+
+        } elseif ($action === 'save_subject') {
             $returnAnchor = '#subject-details';
             updateSubjectDetails($pdo, $subjectId, [
                 'intro'            => $_POST['intro'] ?? null,
@@ -215,8 +242,15 @@ include __DIR__ . '/../../includes/admin-nav.php';
             <p id="intro-count" class="text-xs opacity-60 mt-1"></p>
         </div>
 
-        <div>
-            <label for="explanation" class="block font-semibold mb-1">Explanation</label>
+        <div id="explanation-field" class="scroll-mt-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                <label for="explanation" class="block font-semibold">Explanation</label>
+                <?php if (aiProposalsAvailable()): ?>
+                <?php // Submits this form with draft_explanation set: the draft comes back unsaved. ?>
+                <button type="submit" name="draft_explanation" value="1" formnovalidate
+                    class="btn btn-xs btn-outline" id="draft-button">Draft this for me</button>
+                <?php endif; ?>
+            </div>
             <p class="text-xs opacity-70 mb-2">
                 The written guide shown below the figures. Leave blank to hide the section.
                 Formatting: <code class="font-mono">## Heading</code>, <code class="font-mono">### Smaller heading</code>,
@@ -224,6 +258,18 @@ include __DIR__ . '/../../includes/admin-nav.php';
                 <code class="font-mono">**bold**</code> and <code class="font-mono">[link text](/uk/tax/)</code>.
                 A blank line starts a new paragraph.
             </p>
+            <?php if (!empty($oldSubject['draft_explanation'])): ?>
+            <?php // Shown right after "Draft this for me", next to the draft itself, so it can't be missed. ?>
+            <div class="alert <?= !empty($oldSubject['draft_unmatched']) ? 'alert-error' : 'alert-info' ?> mb-3 text-sm">
+                <span>
+                    AI first draft, <strong>not saved</strong>. Rewrite it in your own words, then click Save page details.
+                    <?php if (!empty($oldSubject['draft_unmatched'])): ?>
+                    <br>Check these numbers, which aren't among the page's figures:
+                    <strong><?= e($oldSubject['draft_unmatched']) ?></strong>.
+                    <?php endif; ?>
+                </span>
+            </div>
+            <?php endif; ?>
             <textarea id="explanation" name="explanation" rows="16" class="textarea textarea-bordered w-full font-mono text-sm"
                 data-counter="explanation-count"><?= e($form['explanation']) ?></textarea>
             <p id="explanation-count" class="text-xs opacity-60 mt-1"></p>
@@ -544,6 +590,25 @@ include __DIR__ . '/../../includes/admin-nav.php';
                 .replace(/%/g, ' percent ')
                 .replace(/[^a-z0-9]+/g, '_')
                 .replace(/^_+|_+$/g, '');
+        });
+    })();
+</script>
+
+<script>
+    // "Draft this for me": ask before replacing text already in the box,
+    // and show that it's working, since the AI can take up to a minute.
+    (function () {
+        var button = document.getElementById('draft-button');
+        if (!button) return;
+        button.addEventListener('click', function (event) {
+            var box = document.getElementById('explanation');
+            if (box.value.trim() !== '' && !confirm(
+                'Replace the text in the Explanation box with a new draft? Nothing is saved until you click Save page details.'
+            )) {
+                event.preventDefault();
+                return;
+            }
+            button.textContent = 'Drafting… (up to a minute)';
         });
     })();
 </script>
