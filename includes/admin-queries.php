@@ -135,12 +135,14 @@ function getJurisdictionOptions(int $countryId): array
 
 /**
  * Scheduled scripts the dashboard expects to see in cron_runs, with when
- * they're meant to run. Both are weekly, so a last run more than 8 days
- * ago means the cron job has stopped. Add new cron scripts here.
+ * they're meant to run. A last run more than 8 days ago means the cron
+ * job has stopped (the weekly ones would be a day late by then). Add new
+ * cron scripts here.
  */
 const ADMIN_EXPECTED_CRON_SCRIPTS = [
-    'fetch-boe-rates.php' => 'Mondays 07:00',
-    'check-sources.php'   => 'Mondays 07:30',
+    'fetch-boe-rates.php'      => 'Mondays 07:00',
+    'check-sources.php'        => 'Mondays 07:30',
+    'fetch-search-console.php' => 'Daily 06:00',
 ];
 const ADMIN_CRON_STALE_DAYS = 8;
 
@@ -205,4 +207,61 @@ function getRecentFactChanges(int $limit = 10): array
          ORDER BY fh.changed_at DESC, fh.id DESC
          LIMIT " . (int) $limit
     )->fetchAll();
+}
+
+// ------------------------------------------------------------
+// Search Console (migration 011, filled by
+// scripts/fetch-search-console.php). All for the latest 28-day period.
+// ------------------------------------------------------------
+
+/**
+ * Site totals for the period, or NULL if there's no data yet. Position
+ * is the average weighted by impressions, as Search Console shows it.
+ */
+function getSearchTotals(): ?array
+{
+    $pdo = getDbConnection();
+    $row = $pdo->query(
+        'SELECT COUNT(*) AS pages, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                SUM(position * impressions) / NULLIF(SUM(impressions), 0) AS position,
+                MIN(period_start) AS period_start, MAX(period_end) AS period_end, MAX(fetched_at) AS fetched_at
+         FROM search_console_pages'
+    )->fetch();
+    return ($row && (int) $row['pages'] > 0) ? $row : null;
+}
+
+/** The pages with the most impressions in the period. */
+function getTopSearchPages(int $limit = 10): array
+{
+    $pdo = getDbConnection();
+    return $pdo->query(
+        'SELECT page_path, clicks, impressions, ctr, position
+         FROM search_console_pages
+         ORDER BY impressions DESC, clicks DESC
+         LIMIT ' . (int) $limit
+    )->fetchAll();
+}
+
+/** One page's figures for the period (by its path, e.g. /uk/tax/...), or NULL. */
+function getSearchStatsForPath(string $path): ?array
+{
+    $pdo = getDbConnection();
+    $stmt = $pdo->prepare('SELECT * FROM search_console_pages WHERE page_path = :path');
+    $stmt->execute(['path' => $path]);
+    return $stmt->fetch() ?: null;
+}
+
+/** The searches that showed a page most often in the period. */
+function getTopQueriesForPath(string $path, int $limit = 10): array
+{
+    $pdo = getDbConnection();
+    $stmt = $pdo->prepare(
+        'SELECT query, clicks, impressions, position
+         FROM search_console_queries
+         WHERE page_path = :path
+         ORDER BY impressions DESC
+         LIMIT ' . (int) $limit
+    );
+    $stmt->execute(['path' => $path]);
+    return $stmt->fetchAll();
 }
