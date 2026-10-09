@@ -7,4 +7,5 @@ node_modules/
 # Local database configuration
 config/database.local.php
 
-
+# Google Search Console key file
+config/search-console-key.json
