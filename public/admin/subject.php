@@ -174,6 +174,11 @@ $newFact += [
 // The page's country and its nations, for "Applies to".
 $jurisdictionOptions = getJurisdictionOptions((int) $subject['country_id']);
 
+// Google search figures for this page (Search Console, last 28 days),
+// matched on the page's public path. NULL if Google hasn't shown it yet.
+$searchStats = getSearchStatsForPath(subjectUrlById($subjectId));
+$searchQueries = $searchStats ? getTopQueriesForPath($searchStats['page_path'], 10) : [];
+
 $form = [
     'intro'            => $oldSubject['intro'] ?? (string) $subject['intro'],
     'explanation'      => $oldSubject['explanation'] ?? (string) ($subject['explanation'] ?? ''),
@@ -221,6 +226,53 @@ include __DIR__ . '/../../includes/admin-nav.php';
         <?php endif; ?>
     </div>
     <p class="font-mono text-xs opacity-50 mt-1"><?= e($publicUrl) ?></p>
+</section>
+
+<?php // ---------- Google search (Search Console, last 28 days) ---------- ?>
+<section id="search" class="mb-10 scroll-mt-6">
+    <?php if (!$searchStats): ?>
+    <p class="text-sm opacity-60">
+        No Google search data for this page in the last 28 days.
+    </p>
+    <?php else: ?>
+    <div class="fact-card p-5">
+        <p class="font-mono text-xs uppercase tracking-wide text-secondary mb-2">
+            Google search, <?= date('j M', strtotime($searchStats['period_start'])) ?> to <?= date('j M Y', strtotime($searchStats['period_end'])) ?>
+        </p>
+        <p class="text-sm">
+            <strong><?= number_format((int) $searchStats['impressions']) ?></strong> impressions &middot;
+            <strong><?= number_format((int) $searchStats['clicks']) ?></strong> clicks &middot;
+            <?= number_format((float) $searchStats['ctr'] * 100, 1) ?>% click rate &middot;
+            average position <strong><?= number_format((float) $searchStats['position'], 1) ?></strong>
+        </p>
+        <?php if ($searchQueries): ?>
+        <?php // What people searched for: useful for the intro, explanation and meta title. ?>
+        <details class="mt-3">
+            <summary class="text-sm text-secondary cursor-pointer">Top searches showing this page</summary>
+            <table class="w-full text-sm border-collapse mt-2">
+                <thead>
+                    <tr class="border-b border-primary/40 text-left font-mono text-xs uppercase tracking-wide">
+                        <th class="py-1 pr-4">Search</th>
+                        <th class="py-1 pr-4 text-right">Impr.</th>
+                        <th class="py-1 pr-4 text-right">Clicks</th>
+                        <th class="py-1 text-right">Pos.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($searchQueries as $query): ?>
+                    <tr class="border-b border-primary/10">
+                        <td class="py-1 pr-4"><?= e($query['query']) ?></td>
+                        <td class="py-1 pr-4 text-right"><?= number_format((int) $query['impressions']) ?></td>
+                        <td class="py-1 pr-4 text-right"><?= number_format((int) $query['clicks']) ?></td>
+                        <td class="py-1 text-right"><?= number_format((float) $query['position'], 1) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </details>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
 </section>
 
 <?php // ---------- Subject details ---------- ?>

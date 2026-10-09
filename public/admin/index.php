@@ -13,6 +13,7 @@ requireAdmin();
  *   - whether the weekly cron jobs ran, and how they went
  *   - headline counts, including content gaps (short intros, pages
  *     without an explanation)
+ *   - Google search performance for the last 28 days (Search Console)
  *   - the latest figure changes across the site
  *
  * Everything here is worked out live from the database on each load.
@@ -29,6 +30,17 @@ $waitingTotal = array_sum(array_column($waiting, 1));
 
 $counts = getDashboardCounts();
 $recentChanges = getRecentFactChanges(10);
+
+// Search Console: the latest 28 days, fetched daily by
+// scripts/fetch-search-console.php. NULL until the first run.
+$searchTotals = getSearchTotals();
+$searchPages = $searchTotals ? getTopSearchPages(10) : [];
+
+// Page paths to subject names, so the table shows names where it can.
+$subjectNamesByPath = [];
+foreach (getAdminSubjectList() as $listedSubject) {
+    $subjectNamesByPath[subjectUrlById((int) $listedSubject['id'])] = $listedSubject;
+}
 
 // Cron runs: one row per expected script, plus any other script that has
 // logged runs, so a new cron job shows up even before it's added to
@@ -170,6 +182,77 @@ include __DIR__ . '/../../includes/admin-nav.php';
             </p>
         </a>
     </div>
+</section>
+
+<?php // ---------- Search (Google Search Console) ---------- ?>
+<section class="mb-12">
+    <h2 class="font-display text-2xl font-semibold mb-2">Google search</h2>
+    <?php if (!$searchTotals): ?>
+    <p class="fact-card p-6 text-secondary">
+        No Search Console data yet. It appears after the first run of
+        <span class="font-mono">scripts/fetch-search-console.php</span>.
+    </p>
+    <?php else: ?>
+    <p class="opacity-80 max-w-xl mb-4 text-sm">
+        <?= date('j M', strtotime($searchTotals['period_start'])) ?> to
+        <?= date('j M Y', strtotime($searchTotals['period_end'])) ?>
+        (Search Console runs about 3 days behind).
+    </p>
+    <div class="grid sm:grid-cols-3 gap-5 mb-6">
+        <div class="fact-card p-5">
+            <p class="text-sm opacity-70">Impressions</p>
+            <p class="font-display text-3xl font-semibold my-1"><?= number_format((int) $searchTotals['impressions']) ?></p>
+            <p class="text-xs opacity-60">times a page appeared in results</p>
+        </div>
+        <div class="fact-card p-5">
+            <p class="text-sm opacity-70">Clicks</p>
+            <p class="font-display text-3xl font-semibold my-1"><?= number_format((int) $searchTotals['clicks']) ?></p>
+            <p class="text-xs opacity-60"><?= (int) $searchTotals['pages'] ?> pages seen in search</p>
+        </div>
+        <div class="fact-card p-5">
+            <p class="text-sm opacity-70">Average position</p>
+            <?php // Lower is better: 1 is the top result. ?>
+            <p class="font-display text-3xl font-semibold my-1">
+                <?= $searchTotals['position'] !== null ? number_format((float) $searchTotals['position'], 1) : '—' ?>
+            </p>
+            <p class="text-xs opacity-60">1 is the top of the results</p>
+        </div>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="border-b-2 border-primary text-left font-mono text-xs uppercase tracking-wide">
+                    <th class="py-2 pr-4">Page</th>
+                    <th class="py-2 pr-4 text-right">Impressions</th>
+                    <th class="py-2 pr-4 text-right">Clicks</th>
+                    <th class="py-2 pr-4 text-right">CTR</th>
+                    <th class="py-2 pr-4 text-right">Position</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($searchPages as $searchPage): ?>
+                <?php $pageSubject = $subjectNamesByPath[$searchPage['page_path']] ?? null; ?>
+                <tr class="border-b border-primary/20 align-top">
+                    <td class="py-3 pr-4">
+                        <?php if ($pageSubject): ?>
+                        <?php // Subject pages link to their editor, where the page's top searches are listed. ?>
+                        <a href="/admin/subject.php?id=<?= (int) $pageSubject['id'] ?>#search" class="font-semibold hover:text-accent">
+                            <?= e($pageSubject['name']) ?>
+                        </a>
+                        <?php endif; ?>
+                        <span class="block font-mono text-xs opacity-60"><?= e($searchPage['page_path']) ?></span>
+                    </td>
+                    <td class="py-3 pr-4 text-right"><?= number_format((int) $searchPage['impressions']) ?></td>
+                    <td class="py-3 pr-4 text-right"><?= number_format((int) $searchPage['clicks']) ?></td>
+                    <td class="py-3 pr-4 text-right"><?= number_format((float) $searchPage['ctr'] * 100, 1) ?>%</td>
+                    <td class="py-3 pr-4 text-right"><?= number_format((float) $searchPage['position'], 1) ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
 </section>
 
 <?php // ---------- Recent changes ---------- ?>
